@@ -512,7 +512,7 @@ export function createNftMintHandler(options: CreateNftMintHandlerOptions): {
       client = createPublicClient({
         chain: CHAIN_MAP[network],
         transport: http(resolveRpcUrl(paymentVerification.rpcUrl, network)),
-      });
+      }) as unknown as PublicClient;
       viemClients.set(network, client);
     }
     return client!;

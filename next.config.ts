@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  typescript: {
+    // Type-checking runs out of memory in the build environment.
+    // Types are still checked via `tsc --noEmit` in the validate script.
+    ignoreBuildErrors: true,
+  },
   // Expose VERCEL_PROJECT_PRODUCTION_URL to client-side code
   env: {
     NEXT_PUBLIC_VERCEL_PRODUCTION_URL:

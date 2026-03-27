@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "db:push": "[ -z \"$DATABASE_URL\" ] || drizzle-kit push --force --verbose </dev/null",
-    "build": "next build",
+    "build": "rimraf .vercel/output && next build",
     "clean": "rimraf .next node_modules",
     "cleanup": "node scripts/cleanup.js",
     "deploy:raw": "vercel --prod",
