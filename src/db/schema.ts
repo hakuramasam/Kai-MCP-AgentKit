@@ -1,4 +1,11 @@
-import { pgTable, text } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  integer,
+  timestamp,
+  jsonb,
+} from "drizzle-orm/pg-core";
 
 /**
  * Key-Value Store Table
@@ -24,15 +31,39 @@ export const kv = pgTable("kv", {
 });
 
 /**
- * Add your custom tables below this line
- *
- * Example:
- *
- * export const gameScores = pgTable("game_scores", {
- *   id: uuid("id").primaryKey().defaultRandom(),
- *   fid: integer("fid").notNull(),
- *   score: integer("score").notNull(),
- *   username: text("username").notNull(),
- *   createdAt: timestamp("created_at").defaultNow().notNull()
- * });
+ * Chat sessions — one per user conversation thread
  */
+export const chatSessions = pgTable("chat_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fid: integer("fid").notNull(),
+  title: text("title").notNull().default("New conversation"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * Chat messages — individual messages in a session
+ */
+export const chatMessages = pgTable("chat_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("session_id").notNull(),
+  fid: integer("fid").notNull(),
+  role: text("role").notNull(), // 'user' | 'assistant' | 'tool'
+  content: text("content").notNull(),
+  toolCalls: jsonb("tool_calls"), // tool call metadata if role = 'assistant'
+  toolName: text("tool_name"), // if role = 'tool'
+  tokens: integer("tokens"), // token usage
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * Agent memory — semantic memories stored per user
+ */
+export const agentMemory = pgTable("agent_memory", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fid: integer("fid").notNull(),
+  content: text("content").notNull(), // the memory text
+  category: text("category").notNull().default("general"), // 'preference' | 'fact' | 'context' | 'general'
+  importance: integer("importance").notNull().default(5), // 1-10
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

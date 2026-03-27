@@ -1,13 +1,13 @@
 {
-  "name": "replace-this",
-  "shortName": "replace-this",
-  "subtitle": "replace-this",
-  "description": "replace-this",
-  "shortDescription": "replace-this",
-  "primaryCategory": "utility",
-  "tags": [],
-  "splashBackgroundColor": "#000000",
-  "tagline": "replace-this",
-  "requiredChains": ["eip155:8453", "eip155:1"],
-  "shareButtonTitle": "Launch App"
+  "name": "AgentKit",
+  "shortName": "AgentKit",
+  "subtitle": "AI agent with memory",
+  "description": "A multi-agent AI chat powered by OpenRouter with tool calling, semantic memory, and autonomous task execution.",
+  "shortDescription": "Multi-agent AI chat with tool calling and memory.",
+  "primaryCategory": "productivity",
+  "tags": ["ai", "agent", "chat", "tools"],
+  "splashBackgroundColor": "#0a0a0f",
+  "tagline": "Think deeper, together",
+  "requiredChains": ["eip155:8453"],
+  "shareButtonTitle": "Try AgentKit"
 }
