@@ -200,6 +200,8 @@ export type ToolExecutorContext = {
   fid: number;
   memories?: Array<{ content: string; category: string }>;
   onMemorySave?: (content: string, category: string, importance: number) => Promise<void>;
+  /** Semantic recall function — injected by API route when Supabase is configured */
+  onMemoryRecall?: (query: string, category: string) => Promise<Array<{ content: string; category: string; similarity?: number }>>;
 };
 
 export async function executeTool(
@@ -234,6 +236,21 @@ export async function executeTool(
 
       case "recall_memory": {
         const parsed = recallMemorySchema.parse(args);
+
+        // Use semantic recall if available (Supabase pgvector)
+        if (ctx.onMemoryRecall) {
+          const results = await ctx.onMemoryRecall(parsed.query, parsed.category);
+          if (results.length === 0) {
+            return JSON.stringify({ found: false, message: "No relevant memories found." });
+          }
+          return JSON.stringify({
+            found: true,
+            memories: results,
+            searchType: "semantic",
+          });
+        }
+
+        // Keyword fallback using pre-loaded memories
         const mems = ctx.memories ?? [];
         const filtered =
           parsed.category === "all"
@@ -245,7 +262,7 @@ export async function executeTool(
         if (relevant.length === 0) {
           return JSON.stringify({ found: false, message: "No relevant memories found." });
         }
-        return JSON.stringify({ found: true, memories: relevant });
+        return JSON.stringify({ found: true, memories: relevant, searchType: "keyword" });
       }
 
       case "analyze_data":

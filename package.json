@@ -33,6 +33,7 @@
     "@metamask/jazzicon": "2.0.0",
     "@neynar/nodejs-sdk": "3.34.0",
     "@neynar/ui": "0.3.1",
+    "@supabase/supabase-js": "^2.100.1",
     "@tanstack/react-query": "5.90.5",
     "drizzle-orm": "^0.38.3",
     "jotai": "2.15.0",
@@ -49,7 +50,6 @@
     "zod": "4.1.12"
   },
   "devDependencies": {
-    "abitype": "^1.1.1",
     "@eslint/eslintrc": "^3",
     "@next/eslint-plugin-next": "16.2.0",
     "@neynar/eslint-plugin": "0.0.3",
@@ -59,6 +59,7 @@
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "@vercel/sdk": "^1.9.0",
+    "abitype": "^1.1.1",
     "babel-plugin-react-compiler": "1.0.0",
     "crypto": "^1.0.1",
     "drizzle-kit": "^0.31.5",

@@ -1,7 +1,12 @@
 import { NextRequest } from "next/server";
 import { ORCHESTRATOR_CONFIG } from "@/features/agent/orchestrator";
 import { runAgentStream } from "@/features/agent/lib/agent-runner";
-import { getMemories, saveMemory, saveMessage, touchSession } from "@/db/actions/chat-actions";
+import { getMemories, saveMessage, touchSession } from "@/db/actions/chat-actions";
+import {
+  saveMemoryWithEmbedding,
+  recallMemoriesSemantic,
+  getAllMemoriesForContext,
+} from "@/features/agent/lib/vector-memory";
 import type { LLMMessage, StreamEvent } from "@/features/agent/types";
 
 export const runtime = "nodejs";
@@ -56,14 +61,14 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Load memories for context
-    const memories = await getMemories(fid, 15);
+    // Load memories for context injection (top memories by importance)
+    const contextMemories = await getAllMemoriesForContext(fid, 15);
     const memoryContext =
-      memories.length > 0
-        ? `\n\nUser memories:\n${memories.map((m) => `[${m.category}] ${m.content}`).join("\n")}`
+      contextMemories.length > 0
+        ? `\n\nUser memories:\n${contextMemories.map((m) => `[${m.category}] ${m.content}`).join("\n")}`
         : "";
 
-    // Build LLM messages with memory context injected into first user message
+    // Build LLM messages with memory context injected into the latest user message
     const llmMessages: LLMMessage[] = messages.map((m, i) => ({
       role: m.role as LLMMessage["role"],
       content:
@@ -95,9 +100,24 @@ export async function POST(req: NextRequest) {
             llmMessages,
             {
               fid,
-              memories: memories.map((m) => ({ content: m.content, category: m.category })),
+              memories: contextMemories,
+              // Semantic save — embeds content and stores in Supabase + Postgres
               onMemorySave: async (content, category, importance) => {
-                await saveMemory({ fid, content, category, importance });
+                await saveMemoryWithEmbedding({ fid, content, category, importance });
+              },
+              // Semantic recall — pgvector similarity search with keyword fallback
+              onMemoryRecall: async (query, category) => {
+                const results = await recallMemoriesSemantic({
+                  fid,
+                  query,
+                  category: category === "all" ? undefined : category,
+                  limit: 5,
+                });
+                return results.map((r) => ({
+                  content: r.content,
+                  category: r.category,
+                  similarity: r.similarity,
+                }));
               },
             },
             emit,
