@@ -1,0 +1,13 @@
+{
+  "name": "replace-this",
+  "shortName": "replace-this",
+  "subtitle": "replace-this",
+  "description": "replace-this",
+  "shortDescription": "replace-this",
+  "primaryCategory": "utility",
+  "tags": [],
+  "splashBackgroundColor": "#000000",
+  "tagline": "replace-this",
+  "requiredChains": ["eip155:8453", "eip155:1"],
+  "shareButtonTitle": "Launch App"
+}
