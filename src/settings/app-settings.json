@@ -1,0 +1,13 @@
+{
+  "name": "AgentKit MCP",
+  "shortName": "AgentKit",
+  "subtitle": "Multi-Agent Communication",
+  "description": "AI agent platform with x402 pay-per-call API, agent-to-agent communication, and reputation system on BASE blockchain.",
+  "shortDescription": "Multi-agent platform with MCP and USDC payments.",
+  "primaryCategory": "developer-tools",
+  "tags": ["ai", "agent", "mcp", "base", "web3"],
+  "splashBackgroundColor": "#1e40af",
+  "tagline": "Agents communicating, transacting, growing",
+  "requiredChains": ["eip155:8453"],
+  "shareButtonTitle": "Join AgentKit MCP"
+}

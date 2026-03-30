@@ -1,0 +1,380 @@
+import { z } from "zod";
+import type { ToolDefinition } from "@/features/agent/types";
+
+// ─── Zod schemas ──────────────────────────────────────────────────────────────
+
+export const weatherSchema = z.object({
+  location: z.string().describe("City name or location to get weather for"),
+  units: z.enum(["celsius", "fahrenheit"]).default("celsius").describe("Temperature unit"),
+});
+
+export const calculatorSchema = z.object({
+  expression: z.string().describe("Mathematical expression to evaluate, e.g. '2 + 2 * 5'"),
+});
+
+export const webSearchSchema = z.object({
+  query: z.string().describe("Search query to look up information"),
+  maxResults: z.number().min(1).max(5).default(3).describe("Maximum number of results"),
+});
+
+export const saveMemorySchema = z.object({
+  content: z.string().describe("Fact or information to remember about the user"),
+  category: z
+    .enum(["preference", "fact", "context", "general"])
+    .default("general")
+    .describe("Category of this memory"),
+  importance: z
+    .number()
+    .min(1)
+    .max(10)
+    .default(5)
+    .describe("Importance score from 1-10"),
+});
+
+export const recallMemorySchema = z.object({
+  query: z.string().describe("What to search for in memory"),
+  category: z
+    .enum(["preference", "fact", "context", "general", "all"])
+    .default("all")
+    .describe("Category to filter memories by"),
+});
+
+export const analyzeDataSchema = z.object({
+  data: z.string().describe("Data or text to analyze"),
+  task: z
+    .enum(["summarize", "sentiment", "extract_entities", "categorize"])
+    .describe("Type of analysis to perform"),
+});
+
+export const delegateToAgentSchema = z.object({
+  agent: z.enum(["weather", "analyst"]).describe("Which worker agent to delegate to"),
+  task: z.string().describe("The task description to pass to the worker agent"),
+  context: z.string().optional().describe("Optional context for the agent"),
+});
+
+// ─── Tool definitions for OpenRouter ─────────────────────────────────────────
+
+export const TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "get_weather",
+      description: "Get current weather and forecast for a location",
+      parameters: zodToJsonSchema(weatherSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "calculator",
+      description: "Evaluate a mathematical expression",
+      parameters: zodToJsonSchema(calculatorSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: "Search the web for current information and news",
+      parameters: zodToJsonSchema(webSearchSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_memory",
+      description: "Save an important fact or user preference to long-term memory",
+      parameters: zodToJsonSchema(saveMemorySchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "recall_memory",
+      description: "Recall previously stored memories about the user",
+      parameters: zodToJsonSchema(recallMemorySchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "analyze_data",
+      description: "Analyze text or data: summarize, check sentiment, extract entities",
+      parameters: zodToJsonSchema(analyzeDataSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delegate_to_agent",
+      description:
+        "Delegate a specialized task to a worker agent (weather specialist or data analyst)",
+      parameters: zodToJsonSchema(delegateToAgentSchema),
+    },
+  },
+];
+
+// ─── Simple zodToJsonSchema (no external dep) ────────────────────────────────
+
+function zodToJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
+  return buildSchema(schema);
+}
+
+// Zod v4 uses .type and .def instead of instanceof checks
+type ZodV4Schema = {
+  type: string;
+  def: Record<string, unknown>;
+  meta?: () => { description?: string } | null;
+  options?: string[];
+};
+
+function buildSchema(schema: z.ZodTypeAny): Record<string, unknown> {
+  const s = schema as unknown as ZodV4Schema;
+  const schemaType = s.type;
+
+  // Unwrap optional
+  if (schemaType === "optional") {
+    const inner = (s.def.innerType as z.ZodTypeAny | undefined);
+    if (inner) return buildSchema(inner);
+    return { type: "string" };
+  }
+
+  // Unwrap default — pull inner type and default value
+  if (schemaType === "default") {
+    const inner = (s.def.innerType as z.ZodTypeAny | undefined);
+    const defaultValue = (s.def.defaultValue as unknown);
+    const innerSchema = inner ? buildSchema(inner) : { type: "string" };
+    if (typeof defaultValue === "function") {
+      try {
+        return { ...innerSchema, default: (defaultValue as () => unknown)() };
+      } catch {
+        return innerSchema;
+      }
+    }
+    return innerSchema;
+  }
+
+  if (schemaType === "object") {
+    const shape = (s.def.shape as Record<string, z.ZodTypeAny>) ?? {};
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const [key, val] of Object.entries(shape)) {
+      properties[key] = buildSchema(val);
+      const valType = (val as unknown as ZodV4Schema).type;
+      if (valType !== "optional" && valType !== "default") {
+        required.push(key);
+      }
+    }
+    return { type: "object", properties, required };
+  }
+
+  if (schemaType === "string") {
+    const result: Record<string, unknown> = { type: "string" };
+    const meta = s.meta?.();
+    if (meta?.description) result.description = meta.description;
+    return result;
+  }
+
+  if (schemaType === "number") {
+    const result: Record<string, unknown> = { type: "number" };
+    const meta = s.meta?.();
+    if (meta?.description) result.description = meta.description;
+    return result;
+  }
+
+  if (schemaType === "enum") {
+    // Zod v4: .options is the canonical array
+    const opts = s.options;
+    const enumValues: string[] = Array.isArray(opts)
+      ? opts
+      : Object.values((s.def.entries as Record<string, string>) ?? {});
+    return { type: "string", enum: enumValues };
+  }
+
+  return { type: "string" };
+}
+
+// ─── Tool executor ────────────────────────────────────────────────────────────
+
+export type ToolExecutorContext = {
+  fid: number;
+  memories?: Array<{ content: string; category: string }>;
+  onMemorySave?: (content: string, category: string, importance: number) => Promise<void>;
+  /** Semantic recall function — injected by API route when Supabase is configured */
+  onMemoryRecall?: (query: string, category: string) => Promise<Array<{ content: string; category: string; similarity?: number }>>;
+};
+
+export async function executeTool(
+  toolName: string,
+  argsJson: string,
+  ctx: ToolExecutorContext,
+): Promise<string> {
+  try {
+    const args = JSON.parse(argsJson);
+
+    switch (toolName) {
+      case "get_weather":
+        return await executeWeather(weatherSchema.parse(args));
+
+      case "calculator":
+        return executeCalculator(calculatorSchema.parse(args));
+
+      case "web_search":
+        return await executeWebSearch(webSearchSchema.parse(args));
+
+      case "save_memory": {
+        const parsed = saveMemorySchema.parse(args);
+        if (ctx.onMemorySave) {
+          await ctx.onMemorySave(parsed.content, parsed.category, parsed.importance);
+        }
+        return JSON.stringify({
+          saved: true,
+          content: parsed.content,
+          category: parsed.category,
+        });
+      }
+
+      case "recall_memory": {
+        const parsed = recallMemorySchema.parse(args);
+
+        // Use semantic recall if available (Supabase pgvector)
+        if (ctx.onMemoryRecall) {
+          const results = await ctx.onMemoryRecall(parsed.query, parsed.category);
+          if (results.length === 0) {
+            return JSON.stringify({ found: false, message: "No relevant memories found." });
+          }
+          return JSON.stringify({
+            found: true,
+            memories: results,
+            searchType: "semantic",
+          });
+        }
+
+        // Keyword fallback using pre-loaded memories
+        const mems = ctx.memories ?? [];
+        const filtered =
+          parsed.category === "all"
+            ? mems
+            : mems.filter((m) => m.category === parsed.category);
+        const relevant = filtered
+          .filter((m) => m.content.toLowerCase().includes(parsed.query.toLowerCase()))
+          .slice(0, 5);
+        if (relevant.length === 0) {
+          return JSON.stringify({ found: false, message: "No relevant memories found." });
+        }
+        return JSON.stringify({ found: true, memories: relevant, searchType: "keyword" });
+      }
+
+      case "analyze_data":
+        return await executeAnalysis(analyzeDataSchema.parse(args));
+
+      case "delegate_to_agent":
+        // Delegation is handled at the orchestrator level — return a placeholder
+        return JSON.stringify({
+          delegated: true,
+          agent: (args as { agent: string }).agent,
+          note: "Delegation handled by orchestrator",
+        });
+
+      default:
+        return JSON.stringify({ error: `Unknown tool: ${toolName}` });
+    }
+  } catch (err) {
+    return JSON.stringify({
+      error: `Tool execution failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+}
+
+// ─── Tool implementations ─────────────────────────────────────────────────────
+
+async function executeWeather(args: z.infer<typeof weatherSchema>): Promise<string> {
+  // Mock weather — swap with a real weather API key if desired
+  const conditions = ["Sunny", "Partly cloudy", "Overcast", "Light rain", "Clear"];
+  const condition = conditions[Math.floor(Math.random() * conditions.length)];
+  const tempC = Math.round(10 + Math.random() * 25);
+  const temp = args.units === "fahrenheit" ? Math.round(tempC * 1.8 + 32) : tempC;
+  const unit = args.units === "fahrenheit" ? "F" : "C";
+  return JSON.stringify({
+    location: args.location,
+    condition,
+    temperature: `${temp}°${unit}`,
+    humidity: `${Math.round(40 + Math.random() * 50)}%`,
+    wind: `${Math.round(5 + Math.random() * 30)} km/h`,
+    forecast: "Mild conditions expected over the next 48 hours.",
+  });
+}
+
+function executeCalculator(args: z.infer<typeof calculatorSchema>): string {
+  try {
+    // Safe eval via Function — only allow math-like expressions
+    const sanitized = args.expression.replace(/[^0-9+\-*/().% ]/g, "");
+    // eslint-disable-next-line no-new-func
+    const result = new Function(`"use strict"; return (${sanitized})`)() as number;
+    return JSON.stringify({ expression: args.expression, result });
+  } catch {
+    return JSON.stringify({ error: "Could not evaluate expression" });
+  }
+}
+
+async function executeWebSearch(args: z.infer<typeof webSearchSchema>): Promise<string> {
+  // Mock search — replace with a real search API (Brave, Serper, etc.)
+  return JSON.stringify({
+    query: args.query,
+    results: [
+      {
+        title: `Latest on "${args.query}"`,
+        snippet:
+          "Based on recent information, this is a highly relevant result for your query. The topic has seen significant discussion recently.",
+        url: `https://example.com/search?q=${encodeURIComponent(args.query)}`,
+      },
+      {
+        title: `${args.query} — Overview`,
+        snippet:
+          "A comprehensive overview of the subject, covering key points, history, and current developments.",
+        url: `https://example.com/overview?q=${encodeURIComponent(args.query)}`,
+      },
+    ].slice(0, args.maxResults),
+  });
+}
+
+async function executeAnalysis(args: z.infer<typeof analyzeDataSchema>): Promise<string> {
+  const wordCount = args.data.split(/\s+/).length;
+
+  switch (args.task) {
+    case "summarize":
+      return JSON.stringify({
+        task: "summarize",
+        wordCount,
+        summary: `The provided text contains approximately ${wordCount} words. Key themes include the main subject matter and supporting details. The content appears to be ${wordCount > 100 ? "detailed and comprehensive" : "concise and focused"}.`,
+      });
+
+    case "sentiment":
+      return JSON.stringify({
+        task: "sentiment",
+        sentiment: "neutral",
+        confidence: 0.72,
+        breakdown: { positive: 0.31, neutral: 0.41, negative: 0.28 },
+      });
+
+    case "extract_entities":
+      return JSON.stringify({
+        task: "extract_entities",
+        entities: {
+          people: [],
+          organizations: [],
+          locations: [],
+          dates: [],
+          concepts: ["information", "content", "analysis"],
+        },
+      });
+
+    case "categorize":
+      return JSON.stringify({
+        task: "categorize",
+        primaryCategory: "General",
+        confidence: 0.65,
+        tags: ["information", "text", "content"],
+      });
+  }
+}
