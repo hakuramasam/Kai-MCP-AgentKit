@@ -11,6 +11,9 @@ const TOOL_ICONS: Record<string, string> = {
   recall_memory: "💭",
   analyze_data: "📊",
   delegate_to_agent: "🤝",
+  check_wallet_balance: "💰",
+  send_eth: "⬆️",
+  get_recent_transactions: "📋",
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -21,7 +24,13 @@ const TOOL_LABELS: Record<string, string> = {
   recall_memory: "Recalling memory",
   analyze_data: "Analyzing data",
   delegate_to_agent: "Delegating",
+  check_wallet_balance: "Checking balance",
+  send_eth: "Sending ETH",
+  get_recent_transactions: "Fetching txns",
 };
+
+// Blockchain tools get a special gold accent color
+const BLOCKCHAIN_TOOLS = new Set(["check_wallet_balance", "send_eth", "get_recent_transactions"]);
 
 interface ToolBadgeProps {
   activity: ToolActivity;
@@ -31,15 +40,21 @@ export function ToolBadge({ activity }: ToolBadgeProps) {
   const icon = TOOL_ICONS[activity.name] ?? "⚙️";
   const label = TOOL_LABELS[activity.name] ?? activity.name;
 
+  const isChain = BLOCKCHAIN_TOOLS.has(activity.name);
+
   return (
     <div
       className={cn(
         "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
         "border transition-all duration-300",
-        activity.status === "running" &&
+        activity.status === "running" && !isChain &&
           "bg-violet-500/10 border-violet-500/30 text-violet-300 animate-pulse",
-        activity.status === "done" &&
+        activity.status === "running" && isChain &&
+          "bg-amber-500/10 border-amber-500/30 text-amber-300 animate-pulse",
+        activity.status === "done" && !isChain &&
           "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
+        activity.status === "done" && isChain &&
+          "bg-amber-500/10 border-amber-500/30 text-amber-300",
         activity.status === "error" &&
           "bg-red-500/10 border-red-500/30 text-red-300",
       )}

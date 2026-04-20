@@ -1,5 +1,11 @@
 import { z } from "zod";
 import type { ToolDefinition } from "@/features/agent/types";
+import {
+  getWalletBalance,
+  sendEth,
+  getRecentTransactions,
+  isWalletConfigured,
+} from "@/features/agent/lib/wallet";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -50,6 +56,39 @@ export const delegateToAgentSchema = z.object({
   agent: z.enum(["weather", "analyst"]).describe("Which worker agent to delegate to"),
   task: z.string().describe("The task description to pass to the worker agent"),
   context: z.string().optional().describe("Optional context for the agent"),
+});
+
+export const checkWalletBalanceSchema = z.object({
+  address: z
+    .string()
+    .optional()
+    .describe(
+      "Ethereum address to check. Omit to check the app's own server wallet on Base Mainnet.",
+    ),
+});
+
+export const sendEthSchema = z.object({
+  to: z.string().describe("Recipient Ethereum address (0x...)"),
+  amountEth: z
+    .string()
+    .describe(
+      "Amount of ETH to send as a decimal string, e.g. '0.001'. Max 0.1 ETH per call.",
+    ),
+});
+
+export const getRecentTransactionsSchema = z.object({
+  address: z
+    .string()
+    .optional()
+    .describe(
+      "Ethereum address to look up. Omit to use the app's server wallet.",
+    ),
+  limit: z
+    .number()
+    .min(1)
+    .max(10)
+    .default(5)
+    .describe("Number of recent transactions to return (max 10)"),
 });
 
 // ─── Tool definitions for OpenRouter ─────────────────────────────────────────
@@ -110,6 +149,33 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       description:
         "Delegate a specialized task to a worker agent (weather specialist or data analyst)",
       parameters: zodToJsonSchema(delegateToAgentSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "check_wallet_balance",
+      description:
+        "Check the ETH and USDC balance of a wallet address on Base Mainnet. Omit address to check the app's own server wallet.",
+      parameters: zodToJsonSchema(checkWalletBalanceSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "send_eth",
+      description:
+        "Send ETH on Base Mainnet from the app's server wallet to a recipient address. Requires explicit user confirmation. Safety limit: 0.1 ETH per call.",
+      parameters: zodToJsonSchema(sendEthSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_recent_transactions",
+      description:
+        "Get recent transaction history for a wallet address on Base Mainnet via Basescan.",
+      parameters: zodToJsonSchema(getRecentTransactionsSchema),
     },
   },
 ];
@@ -275,6 +341,39 @@ export async function executeTool(
           agent: (args as { agent: string }).agent,
           note: "Delegation handled by orchestrator",
         });
+
+      case "check_wallet_balance": {
+        const parsed = checkWalletBalanceSchema.parse(args);
+        if (!parsed.address && !isWalletConfigured()) {
+          return JSON.stringify({
+            error: "WALLET_PRIVATE_KEY is not configured. Add it to .env to enable on-chain tools.",
+          });
+        }
+        const balance = await getWalletBalance(parsed.address);
+        return JSON.stringify(balance);
+      }
+
+      case "send_eth": {
+        const parsed = sendEthSchema.parse(args);
+        if (!isWalletConfigured()) {
+          return JSON.stringify({
+            error: "WALLET_PRIVATE_KEY is not configured. Add it to .env to enable on-chain tools.",
+          });
+        }
+        const result = await sendEth({ to: parsed.to, amountEth: parsed.amountEth });
+        return JSON.stringify(result);
+      }
+
+      case "get_recent_transactions": {
+        const parsed = getRecentTransactionsSchema.parse(args);
+        if (!parsed.address && !isWalletConfigured()) {
+          return JSON.stringify({
+            error: "WALLET_PRIVATE_KEY is not configured. Add it to .env to enable on-chain tools.",
+          });
+        }
+        const txs = await getRecentTransactions(parsed.address, parsed.limit);
+        return JSON.stringify(txs);
+      }
 
       default:
         return JSON.stringify({ error: `Unknown tool: ${toolName}` });
