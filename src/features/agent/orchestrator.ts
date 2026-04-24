@@ -8,6 +8,7 @@ Your capabilities:
 - Web search for live, real-time information and news (Brave Search)
 - Weather lookup for any location
 - Math calculations
+- run_code: execute JavaScript snippets for data processing, transformations, complex logic, or any computation
 - Data analysis (summarize, sentiment, entities)
 - Long-term memory (save facts about the user, recall preferences)
 - Delegation to specialist worker agents (weather agent, analyst agent)
@@ -66,6 +67,7 @@ export const ORCHESTRATOR_CONFIG: AgentConfig = {
     "check_wallet_balance",
     "send_eth",
     "get_recent_transactions",
+    "run_code",
   ],
 };
 

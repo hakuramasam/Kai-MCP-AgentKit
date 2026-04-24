@@ -7,6 +7,7 @@ import {
   isWalletConfigured,
 } from "@/features/agent/lib/wallet";
 import { braveSearch, isBraveConfigured } from "@/features/agent/lib/brave-search";
+import { runJavaScript } from "@/features/agent/lib/code-runner";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -90,6 +91,18 @@ export const getRecentTransactionsSchema = z.object({
     .max(10)
     .default(5)
     .describe("Number of recent transactions to return (max 10)"),
+});
+
+export const runCodeSchema = z.object({
+  code: z
+    .string()
+    .describe(
+      "JavaScript code to execute. Use console.log() to output results. The last expression's return value is also captured. No network, filesystem, or require access. Timeout: 5 seconds.",
+    ),
+  description: z
+    .string()
+    .optional()
+    .describe("Brief description of what the code does, shown in the UI"),
 });
 
 // ─── Tool definitions for OpenRouter ─────────────────────────────────────────
@@ -178,6 +191,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       description:
         "Get recent transaction history for a wallet address on Base Mainnet via Basescan.",
       parameters: zodToJsonSchema(getRecentTransactionsSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_code",
+      description:
+        "Execute JavaScript code in a sandboxed environment and return stdout + return value. Use for: data transformation, complex calculations, string processing, sorting/filtering arrays, date math, generating structured output, or any logic that benefits from actual code over mental math. No network or filesystem access.",
+      parameters: zodToJsonSchema(runCodeSchema),
     },
   },
 ];
@@ -375,6 +397,37 @@ export async function executeTool(
         }
         const txs = await getRecentTransactions(parsed.address, parsed.limit);
         return JSON.stringify(txs);
+      }
+
+      case "run_code": {
+        const parsed = runCodeSchema.parse(args);
+        const result = runJavaScript(parsed.code);
+
+        // Format output for the LLM
+        const output: Record<string, unknown> = {
+          executionMs: result.executionMs,
+        };
+
+        if (result.stdout.length > 0) {
+          output.stdout = result.stdout.join("\n");
+        }
+
+        if (result.returnValue !== undefined && result.returnValue !== "undefined") {
+          output.returnValue = result.returnValue;
+        }
+
+        if (result.error) {
+          output.error = result.error;
+          output.status = "error";
+        } else {
+          output.status = "success";
+        }
+
+        if (result.truncated) {
+          output.note = "Output was truncated (limit: 8000 chars)";
+        }
+
+        return JSON.stringify(output);
       }
 
       default:
