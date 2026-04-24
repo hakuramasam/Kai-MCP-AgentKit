@@ -6,6 +6,7 @@ import {
   getRecentTransactions,
   isWalletConfigured,
 } from "@/features/agent/lib/wallet";
+import { braveSearch, isBraveConfigured } from "@/features/agent/lib/brave-search";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -114,7 +115,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "web_search",
-      description: "Search the web for current information and news",
+      description:
+        "Search the web for current information, news, and live data using Brave Search. Use this for anything time-sensitive or requiring up-to-date facts.",
       parameters: zodToJsonSchema(webSearchSchema),
     },
   },
@@ -417,23 +419,28 @@ function executeCalculator(args: z.infer<typeof calculatorSchema>): string {
 }
 
 async function executeWebSearch(args: z.infer<typeof webSearchSchema>): Promise<string> {
-  // Mock search — replace with a real search API (Brave, Serper, etc.)
+  const response = await braveSearch(args.query, args.maxResults);
+
+  // Surface a hint when key isn't configured yet
+  if (response.searchType === "fallback") {
+    return JSON.stringify({
+      query: response.query,
+      results: response.results,
+      note: "Live search unavailable — BRAVE_SEARCH_API_KEY not set. Get a free key at api.search.brave.com",
+    });
+  }
+
   return JSON.stringify({
-    query: args.query,
-    results: [
-      {
-        title: `Latest on "${args.query}"`,
-        snippet:
-          "Based on recent information, this is a highly relevant result for your query. The topic has seen significant discussion recently.",
-        url: `https://example.com/search?q=${encodeURIComponent(args.query)}`,
-      },
-      {
-        title: `${args.query} — Overview`,
-        snippet:
-          "A comprehensive overview of the subject, covering key points, history, and current developments.",
-        url: `https://example.com/overview?q=${encodeURIComponent(args.query)}`,
-      },
-    ].slice(0, args.maxResults),
+    query: response.query,
+    results: response.results.map((r) => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.description,
+      ...(r.age ? { age: r.age } : {}),
+      ...(r.isNews ? { isNews: true } : {}),
+    })),
+    totalResults: response.totalResults,
+    source: "Brave Search",
   });
 }
 
