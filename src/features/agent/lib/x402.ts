@@ -16,6 +16,7 @@
 import { createPublicClient, http, parseEther, formatEther } from "viem";
 import { base } from "viem/chains";
 import { createHmac, randomBytes } from "crypto";
+import { consumeNonce } from "@/features/agent/lib/nonce-store";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -165,6 +166,11 @@ export async function verifyPayment(
     const txTimestamp = Number(block.timestamp) * 1000;
     if (Date.now() - txTimestamp > TX_FRESHNESS_MS) {
       return { valid: false, error: "Transaction too old — must be within 5 minutes" };
+    }
+
+    // Consume the nonce — reject replays of the same tx+nonce
+    if (!consumeNonce(txHash, nonce)) {
+      return { valid: false, error: "Payment proof already used (replay rejected)" };
     }
 
     return {

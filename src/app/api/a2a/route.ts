@@ -37,6 +37,21 @@ export const maxDuration = 30;
 // Tools excluded from the paywall (free for A2A callers)
 const FREE_TOOLS = new Set(["calculator"]);
 
+/**
+ * Tools BLOCKED on external endpoints (A2A / MCP) for security.
+ *
+ * send_eth        — would let any paying agent drain the server wallet.
+ * check_wallet_balance (no-arg) — leaks server wallet address/balance to
+ *                   outsiders. External callers must supply an explicit address.
+ * get_recent_transactions (no-arg) — leaks server wallet tx history.
+ *
+ * These tools remain fully available in the normal chat interface where
+ * the user is authenticated via Farcaster and the agent controls execution.
+ */
+const EXTERNAL_BLOCKED_TOOLS = new Set([
+  "send_eth", // CRITICAL: no outbound transfers from the server wallet via API
+]);
+
 export async function GET() {
   // Discovery endpoint — list available tools + pricing
   return NextResponse.json({
@@ -47,7 +62,8 @@ export async function GET() {
     network: "base",
     chainId: 8453,
     tools: TOOL_DEFINITIONS
-      .filter((t) => t.function.name !== "delegate_to_agent") // no recursive delegation
+      .filter((t) => t.function.name !== "delegate_to_agent")
+      .filter((t) => !EXTERNAL_BLOCKED_TOOLS.has(t.function.name))
       .map((t) => ({
         name: t.function.name,
         description: t.function.description,
@@ -116,6 +132,34 @@ export async function POST(req: NextRequest) {
   if (tool === "delegate_to_agent") {
     return NextResponse.json(
       { error: "delegate_to_agent is not available via A2A to prevent recursive billing." },
+      { status: 400 },
+    );
+  }
+
+  // Block wallet-draining and sensitive tools on external endpoints
+  if (EXTERNAL_BLOCKED_TOOLS.has(tool)) {
+    return NextResponse.json(
+      {
+        error: `Tool "${tool}" is not available via A2A for security reasons.`,
+        reason: "Outbound transfers from the server wallet cannot be triggered by external agents. Use the chat interface for wallet operations.",
+      },
+      { status: 403 },
+    );
+  }
+
+  // For check_wallet_balance and get_recent_transactions: require explicit address
+  // (prevent external callers from reading the server wallet's own info)
+  if (
+    (tool === "check_wallet_balance" || tool === "get_recent_transactions") &&
+    typeof args === "object" &&
+    args !== null &&
+    !("address" in args && typeof (args as Record<string, unknown>).address === "string")
+  ) {
+    return NextResponse.json(
+      {
+        error: `Tool "${tool}" requires an explicit "address" parameter when called via A2A.`,
+        reason: "External callers cannot read the server wallet's own balance or transaction history.",
+      },
       { status: 400 },
     );
   }

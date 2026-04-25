@@ -136,12 +136,23 @@ export interface SendEthResult {
   status: "submitted";
 }
 
+/** Addresses the server wallet must NEVER send ETH to. */
+const SEND_ETH_BLOCKLIST = new Set([
+  // The payment recipient (our own server wallet) — no self-loops
+  (process.env.NEYNAR_WALLET_ADDRESS ?? "0xd7e2341c4ca1de1c1f55a9514d8e720a60a9a87e").toLowerCase(),
+]);
+
 export async function sendEth(params: {
   to: string;
   amountEth: string;
 }): Promise<SendEthResult> {
   if (!isAddress(params.to)) {
     throw new Error(`Invalid recipient address: ${params.to}`);
+  }
+
+  // Block sending to the server wallet itself or known blocked addresses
+  if (SEND_ETH_BLOCKLIST.has(params.to.toLowerCase())) {
+    throw new Error("Cannot send ETH to the server wallet address.");
   }
 
   const amountFloat = parseFloat(params.amountEth);
@@ -153,6 +164,11 @@ export async function sendEth(params: {
   }
 
   const { walletClient, account } = getWalletClient();
+
+  // Also block sending to the wallet's own signing address
+  if (params.to.toLowerCase() === account.address.toLowerCase()) {
+    throw new Error("Cannot send ETH to the wallet's own address.");
+  }
   const publicClient = getPublicClient();
 
   const amountWei = parseEther(params.amountEth);

@@ -66,6 +66,12 @@ const MCP_PAYMENT_REQUIRED = -32000; // custom
 // Tools free to call without payment
 const FREE_TOOLS = new Set(["calculator"]);
 
+/**
+ * Tools BLOCKED on external endpoints (A2A / MCP) for security.
+ * send_eth: no external agent may trigger outbound transfers from the server wallet.
+ */
+const EXTERNAL_BLOCKED_TOOLS = new Set(["send_eth"]);
+
 export async function POST(req: NextRequest) {
   let rpc: MCPRequest;
 
@@ -132,6 +138,7 @@ export async function POST(req: NextRequest) {
   if (method === "tools/list") {
     const tools = TOOL_DEFINITIONS
       .filter((t) => t.function.name !== "delegate_to_agent")
+      .filter((t) => !EXTERNAL_BLOCKED_TOOLS.has(t.function.name))
       .map((t) => ({
         name: t.function.name,
         description: t.function.description,
@@ -163,6 +170,28 @@ export async function POST(req: NextRequest) {
 
     if (toolName === "delegate_to_agent") {
       return jsonrpcError(id, MCP_INVALID_PARAMS, "delegate_to_agent is not available via MCP.");
+    }
+
+    // Block wallet-draining tools on external endpoints
+    if (EXTERNAL_BLOCKED_TOOLS.has(toolName)) {
+      return jsonrpcError(
+        id,
+        MCP_INVALID_PARAMS,
+        `Tool "${toolName}" is not available via MCP for security reasons. Outbound transfers from the server wallet cannot be triggered by external agents.`,
+      );
+    }
+
+    // Require explicit address for server-wallet-sensitive read tools
+    const callArgs = (params as { name?: string; arguments?: Record<string, unknown> } | undefined)?.arguments ?? {};
+    if (
+      (toolName === "check_wallet_balance" || toolName === "get_recent_transactions") &&
+      !callArgs.address
+    ) {
+      return jsonrpcError(
+        id,
+        MCP_INVALID_PARAMS,
+        `Tool "${toolName}" requires an explicit "address" parameter when called via MCP. External callers cannot read the server wallet's own data.`,
+      );
     }
 
     // ── Payment gate ──────────────────────────────────────────────────────────
