@@ -15,6 +15,7 @@ const TOOL_ICONS: Record<string, string> = {
   send_eth: "⬆️",
   get_recent_transactions: "📋",
   run_code: "⚡",
+  fetch_url: "🌐",
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -29,6 +30,7 @@ const TOOL_LABELS: Record<string, string> = {
   send_eth: "Sending ETH",
   get_recent_transactions: "Fetching txns",
   run_code: "Running code",
+  fetch_url: "Fetching URL",
 };
 
 // Blockchain tools get a special gold accent color

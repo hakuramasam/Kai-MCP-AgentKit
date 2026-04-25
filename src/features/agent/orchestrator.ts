@@ -6,6 +6,7 @@ const ORCHESTRATOR_SYSTEM = `You are AgentKit, a powerful AI assistant with acce
 
 Your capabilities:
 - Web search for live, real-time information and news (Brave Search)
+- fetch_url: fetch and read the full content of any public URL (articles, docs, APIs, GitHub files)
 - Weather lookup for any location
 - Math calculations
 - run_code: execute JavaScript snippets for data processing, transformations, complex logic, or any computation
@@ -68,6 +69,7 @@ export const ORCHESTRATOR_CONFIG: AgentConfig = {
     "send_eth",
     "get_recent_transactions",
     "run_code",
+    "fetch_url",
   ],
 };
 

@@ -8,6 +8,7 @@ import {
 } from "@/features/agent/lib/wallet";
 import { braveSearch, isBraveConfigured } from "@/features/agent/lib/brave-search";
 import { runJavaScript } from "@/features/agent/lib/code-runner";
+import { fetchUrl } from "@/features/agent/lib/fetch-url";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -91,6 +92,11 @@ export const getRecentTransactionsSchema = z.object({
     .max(10)
     .default(5)
     .describe("Number of recent transactions to return (max 10)"),
+});
+
+export const fetchUrlSchema = z.object({
+  url: z.string().describe("Full URL to fetch (must be http:// or https://). Returns page content as clean text stripped of HTML."),
+  summarize: z.boolean().default(false).describe("If true, return a summary hint alongside the content (the LLM will summarize). If false, return raw extracted text."),
 });
 
 export const runCodeSchema = z.object({
@@ -191,6 +197,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       description:
         "Get recent transaction history for a wallet address on Base Mainnet via Basescan.",
       parameters: zodToJsonSchema(getRecentTransactionsSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "fetch_url",
+      description:
+        "Fetch the content of any public URL and return it as clean readable text. Use for: reading articles, documentation, GitHub files, JSON APIs, or any webpage. HTML is stripped automatically. Content is capped at 12,000 characters.",
+      parameters: zodToJsonSchema(fetchUrlSchema),
     },
   },
   {
@@ -397,6 +412,21 @@ export async function executeTool(
         }
         const txs = await getRecentTransactions(parsed.address, parsed.limit);
         return JSON.stringify(txs);
+      }
+
+      case "fetch_url": {
+        const parsed = fetchUrlSchema.parse(args);
+        const result = await fetchUrl(parsed.url);
+        return JSON.stringify({
+          url: result.url,
+          title: result.title,
+          contentType: result.contentType,
+          contentLength: result.contentLength,
+          truncated: result.truncated,
+          fetchedAt: result.fetchedAt,
+          content: result.content,
+          ...(parsed.summarize ? { instruction: "Please summarize the above content for the user." } : {}),
+        });
       }
 
       case "run_code": {
