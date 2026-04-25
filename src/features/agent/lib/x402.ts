@@ -62,9 +62,11 @@ export const TOOL_PRICES: Record<string, string> = {
   check_wallet_balance: "0.0001",
   send_eth: "0.0001",
   thirdweb_ai: "0.0001",       // Nebula AI inference
-  read_contract: "0.00001",    // Read-only RPC call, very cheap
-  nft_data: "0.00003",         // RPC + metadata fetch
-  ipfs: "0.00003",             // Storage upload/download
+
+  // Thirdweb on-chain tools
+  read_contract: "0.00001",    // Read-only RPC call — light
+  nft_data: "0.00003",         // RPC + IPFS metadata fetch — medium
+  ipfs: "0.00003",             // Storage upload/download — medium
 
   // Multi-agent — 0.0002 ETH (~$0.60, covers sub-agent calls)
   delegate_to_agent: "0.0002",

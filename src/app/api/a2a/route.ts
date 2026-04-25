@@ -166,11 +166,12 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Payment gate ────────────────────────────────────────────────────────────
+  let resolvedPaidBy: string | undefined;
+
   if (!FREE_TOOLS.has(tool)) {
     const payment = await checkPayment(req, tool);
 
     if (!payment.paid) {
-      // Charge the IP slot back — this request won't proceed
       return NextResponse.json(
         {
           error: "Payment required",
@@ -197,9 +198,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    resolvedPaidBy = payment.paidBy;
+
     // Payment verified — swap to the generous address-level rate limit
-    if (payment.paidBy) {
-      const addrRl = enforceRateLimit(req, payment.paidBy);
+    if (resolvedPaidBy) {
+      const addrRl = enforceRateLimit(req, resolvedPaidBy);
       if (!addrRl.allowed) {
         return NextResponse.json(
           {
@@ -220,16 +223,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Issue a reusable token so caller doesn't need to pay per-request
+    // First-time payment via X-Payment header → issue reusable token + persist ledger entry
     if (req.headers.get("x-payment") && !req.headers.get("x-payment-token")) {
       const [txHash, nonce] = (req.headers.get("x-payment") ?? "").split(":");
-      const token = issueToken({ txHash, toolName: tool, paidBy: payment.paidBy });
+      const token = issueToken({ txHash, toolName: tool, paidBy: resolvedPaidBy });
 
-      // Persist payment to ledger (non-blocking)
       void recordPayment({
         txHash: txHash ?? "",
         nonce: nonce ?? "",
-        paidBy: payment.paidBy ?? "unknown",
+        paidBy: resolvedPaidBy ?? "unknown",
         toolName: tool,
         amountEth: getToolPrice(tool),
         endpoint: "a2a",
@@ -237,8 +239,14 @@ export async function POST(req: NextRequest) {
       });
 
       const start = Date.now();
-      const result = await runTool(tool, args, fid);
-      void recordToolCall({ toolName: tool, source: "a2a", callerAddress: payment.paidBy, success: true, durationMs: Date.now() - start });
+      let result: unknown;
+      try {
+        result = await runTool(tool, args, fid);
+        void recordToolCall({ toolName: tool, source: "a2a", callerAddress: resolvedPaidBy, success: true, durationMs: Date.now() - start });
+      } catch (e) {
+        void recordToolCall({ toolName: tool, source: "a2a", callerAddress: resolvedPaidBy, success: false, durationMs: Date.now() - start });
+        throw e;
+      }
 
       return NextResponse.json(
         { result, token: token.token, tokenExpiresAt: token.expiresAt },
@@ -252,10 +260,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Execute tool ────────────────────────────────────────────────────────────
+  // ── Execute tool (free tools + token-reuse path) ─────────────────────────────
   const start = Date.now();
-  const result = await runTool(tool, args, fid);
-  void recordToolCall({ toolName: tool, source: "a2a", callerAddress: undefined, success: true, durationMs: Date.now() - start });
+  let result: unknown;
+  try {
+    result = await runTool(tool, args, fid);
+    void recordToolCall({ toolName: tool, source: "a2a", callerAddress: resolvedPaidBy, success: true, durationMs: Date.now() - start });
+  } catch (e) {
+    void recordToolCall({ toolName: tool, source: "a2a", callerAddress: resolvedPaidBy, success: false, durationMs: Date.now() - start });
+    throw e;
+  }
   return NextResponse.json({ result });
 }
 

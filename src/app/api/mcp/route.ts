@@ -196,11 +196,12 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Payment gate ──────────────────────────────────────────────────────────
+    let resolvedPaidBy: string | undefined;
+
     if (!FREE_TOOLS.has(toolName)) {
       const payment = await checkPayment(req, toolName);
 
       if (!payment.paid) {
-        // Nothing to charge back — just issue challenge
         const paymentData = {
           ...payment.challenge,
           instructions: [
@@ -224,9 +225,11 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      resolvedPaidBy = payment.paidBy;
+
       // Payment verified — upgrade to address-level rate limit
-      if (payment.paidBy) {
-        const addrRl = enforceRateLimit(req, payment.paidBy);
+      if (resolvedPaidBy) {
+        const addrRl = enforceRateLimit(req, resolvedPaidBy);
         if (!addrRl.allowed) {
           return NextResponse.json(
             err(id, -32029, "Too many requests", {
@@ -246,16 +249,15 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Issue token on first payment
+      // First-time payment → issue token + persist ledger
       if (req.headers.get("x-payment") && !req.headers.get("x-payment-token")) {
         const [txHash, nonce] = (req.headers.get("x-payment") ?? "").split(":");
-        const token = issueToken({ txHash, toolName, paidBy: payment.paidBy });
+        const token = issueToken({ txHash, toolName, paidBy: resolvedPaidBy });
 
-        // Persist payment (non-blocking)
         void recordPayment({
           txHash: txHash ?? "",
           nonce: nonce ?? "",
-          paidBy: payment.paidBy ?? "unknown",
+          paidBy: resolvedPaidBy ?? "unknown",
           toolName,
           amountEth: getToolPrice(toolName),
           endpoint: "mcp",
@@ -263,8 +265,14 @@ export async function POST(req: NextRequest) {
         });
 
         const start = Date.now();
-        const result = await callTool(toolName, p.arguments, 0);
-        void recordToolCall({ toolName, source: "mcp", callerAddress: payment.paidBy, success: true, durationMs: Date.now() - start });
+        let result: unknown;
+        try {
+          result = await callTool(toolName, p.arguments, 0);
+          void recordToolCall({ toolName, source: "mcp", callerAddress: resolvedPaidBy, success: true, durationMs: Date.now() - start });
+        } catch (e) {
+          void recordToolCall({ toolName, source: "mcp", callerAddress: resolvedPaidBy, success: false, durationMs: Date.now() - start });
+          return jsonrpcError(id, MCP_INTERNAL_ERROR, `Tool execution failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
 
         return NextResponse.json(
           ok(id, { content: [{ type: "text", text: formatToolResult(result) }] }),
@@ -278,16 +286,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Execute ───────────────────────────────────────────────────────────────
+    // ── Execute (free tools + token-reuse path) ───────────────────────────────
+    const execStart = Date.now();
     try {
-      const start = Date.now();
       const result = await callTool(toolName, p.arguments, 0);
-      void recordToolCall({ toolName, source: "mcp", success: true, durationMs: Date.now() - start });
+      void recordToolCall({ toolName, source: "mcp", callerAddress: resolvedPaidBy, success: true, durationMs: Date.now() - execStart });
       return jsonrpcOk(id, {
         content: [{ type: "text", text: formatToolResult(result) }],
       });
     } catch (e) {
-      void recordToolCall({ toolName, source: "mcp", success: false });
+      void recordToolCall({ toolName, source: "mcp", callerAddress: resolvedPaidBy, success: false, durationMs: Date.now() - execStart });
       return jsonrpcError(id, MCP_INTERNAL_ERROR, `Tool execution failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
