@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "@neynar/ui";
 
+const PAYMENT_RECIPIENT = process.env.NEXT_PUBLIC_WALLET_ADDRESS ?? "0xd7e2341c4ca1de1c1f55a9514d8e720a60a9a87e";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface StatsData {
@@ -103,7 +105,7 @@ export function AdminDashboard({ fid }: AdminDashboardProps) {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "tools" | "callers" | "ledger">("overview");
+  const [tab, setTab] = useState<"overview" | "tools" | "callers" | "ledger" | "checklist">("overview");
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
 
   const load = useCallback(async () => {
@@ -187,7 +189,7 @@ export function AdminDashboard({ fid }: AdminDashboardProps) {
 
       {/* Tabs */}
       <div className="flex gap-1 px-4 py-2 border-b border-white/10 flex-shrink-0 overflow-x-auto">
-        {(["overview", "tools", "callers", "ledger"] as const).map((t) => (
+        {(["overview", "tools", "callers", "ledger", "checklist"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -369,6 +371,164 @@ export function AdminDashboard({ fid }: AdminDashboardProps) {
               </div>
             )}
           </>
+        )}
+
+        {/* ── CHECKLIST ── */}
+        {tab === "checklist" && (
+          <div className="space-y-6">
+
+            {/* Table 1 — Security Hardening */}
+            <div>
+              <SectionTitle>🔒 Security Hardening</SectionTitle>
+              <div className="rounded-xl border border-white/10 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-white/5 border-b border-white/10">
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium w-7"></th>
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium">Item</th>
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium hidden sm:table-cell">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {[
+                      { done: true,  item: "send_eth blocked on A2A & MCP",        detail: "Returns 403 — external agents cannot drain server wallet" },
+                      { done: true,  item: "Replay attack prevention",              detail: "Nonce consumed on first use; same tx+nonce rejected forever" },
+                      { done: true,  item: "Tx freshness window",                   detail: "Payments older than 5 min rejected — prevents reuse of old txs" },
+                      { done: true,  item: "check_wallet_balance address guard",    detail: "External callers must supply explicit address" },
+                      { done: true,  item: "get_recent_transactions address guard", detail: "External callers must supply explicit address" },
+                      { done: true,  item: "HMAC-SHA256 bearer tokens",             detail: "Signed with PAYMENT_SECRET; verified on every token-reuse call" },
+                      { done: true,  item: "IP rate limiting (60 req/min)",         detail: "Sliding window per IP before any payment" },
+                      { done: true,  item: "Address rate limiting (300 req/min)",   detail: "Upgraded limit after payment verified — tied to ETH address" },
+                      { done: true,  item: "Server wallet self-transfer blocked",   detail: "send_eth rejects recipient === server wallet address" },
+                      { done: false, item: "Set strong PAYMENT_SECRET env var",     detail: "Add PAYMENT_SECRET=<32+ random bytes> in the env vars panel" },
+                      { done: false, item: "Fund server wallet with ETH",           detail: `Send ETH to ${PAYMENT_RECIPIENT.slice(0, 10)}… on Base for gas` },
+                    ].map((row) => (
+                      <tr key={row.item} className={cn("transition-colors", row.done ? "bg-transparent" : "bg-amber-500/5")}>
+                        <td className="px-3 py-2.5 text-center">
+                          {row.done
+                            ? <span className="text-emerald-400">✓</span>
+                            : <span className="text-amber-400">○</span>
+                          }
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className={row.done ? "text-gray-200" : "text-amber-200 font-medium"}>{row.item}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-500 hidden sm:table-cell">{row.detail}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-gray-600 mt-2 px-1">✓ done &nbsp;○ still needed</p>
+            </div>
+
+            {/* Table 2 — Endpoints & Discovery */}
+            <div>
+              <SectionTitle>🌐 Endpoints &amp; Discovery</SectionTitle>
+              <div className="rounded-xl border border-white/10 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-white/5 border-b border-white/10">
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium w-7"></th>
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium">Endpoint</th>
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium hidden sm:table-cell">Purpose</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {[
+                      { done: true,  path: "GET  /api/a2a",               purpose: "Discovery — lists all tools, pricing, and payment instructions" },
+                      { done: true,  path: "POST /api/a2a",               purpose: "Tool execution — REST interface with x402 paywall" },
+                      { done: true,  path: "POST /api/mcp",               purpose: "MCP JSON-RPC 2.0 — for Claude Desktop, Cursor, and MCP clients" },
+                      { done: true,  path: "GET  /api/tools",             purpose: "Public tool catalog — full params, prices, and tier groupings" },
+                      { done: true,  path: "GET  /.well-known/agent.json",purpose: "A2A agent discovery — capabilities, endpoints, payment schema" },
+                      { done: true,  path: "GET  /api/stats",             purpose: "Public aggregates — non-sensitive tool call counts" },
+                      { done: true,  path: "GET  /api/admin/stats",       purpose: "FID-gated admin stats — revenue, callers, ledger" },
+                      { done: true,  path: "POST /api/agent",             purpose: "Internal chat endpoint — free, authenticated via Farcaster" },
+                      { done: false, path: "Add BASE_RPC_URL env var",    purpose: "Optional: use a dedicated RPC (Alchemy/Infura) for tx verification" },
+                      { done: false, path: "Add Basescan API key",        purpose: "Optional: improves get_recent_transactions reliability" },
+                    ].map((row) => (
+                      <tr key={row.path} className={cn("transition-colors", row.done ? "bg-transparent" : "bg-amber-500/5")}>
+                        <td className="px-3 py-2.5 text-center">
+                          {row.done
+                            ? <span className="text-emerald-400">✓</span>
+                            : <span className="text-amber-400">○</span>
+                          }
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className={cn("font-mono", row.done ? "text-violet-300" : "text-amber-300")}>{row.path}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-500 hidden sm:table-cell">{row.purpose}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Table 3 — Tool Pricing */}
+            <div>
+              <SectionTitle>💳 Tool Pricing</SectionTitle>
+              <div className="rounded-xl border border-white/10 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-white/5 border-b border-white/10">
+                      <th className="text-left px-3 py-2 text-gray-400 font-medium">Tool</th>
+                      <th className="text-right px-3 py-2 text-gray-400 font-medium">ETH</th>
+                      <th className="text-right px-3 py-2 text-gray-400 font-medium hidden sm:table-cell">~USD</th>
+                      <th className="text-right px-3 py-2 text-gray-400 font-medium">Tier</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {[
+                      { tool: "calculator",                price: "0",        tier: "FREE",     icon: "🧮" },
+                      { tool: "get_weather",               price: "0.00001",  tier: "light",    icon: "🌤" },
+                      { tool: "analyze_data",              price: "0.00001",  tier: "light",    icon: "📊" },
+                      { tool: "market_data",               price: "0.00001",  tier: "light",    icon: "📈" },
+                      { tool: "base_tx_lookup",            price: "0.00001",  tier: "light",    icon: "🔗" },
+                      { tool: "read_contract",             price: "0.00001",  tier: "light",    icon: "📜" },
+                      { tool: "save_memory",               price: "0.00003",  tier: "medium",   icon: "🧠" },
+                      { tool: "recall_memory",             price: "0.00003",  tier: "medium",   icon: "💭" },
+                      { tool: "web_search",                price: "0.00003",  tier: "medium",   icon: "🔍" },
+                      { tool: "text_analysis",             price: "0.00003",  tier: "medium",   icon: "🔬" },
+                      { tool: "nft_data",                  price: "0.00003",  tier: "medium",   icon: "🎨" },
+                      { tool: "ipfs",                      price: "0.00003",  tier: "medium",   icon: "📦" },
+                      { tool: "fetch_url",                 price: "0.00005",  tier: "standard", icon: "🌐" },
+                      { tool: "run_code",                  price: "0.00005",  tier: "standard", icon: "⚙️" },
+                      { tool: "get_recent_transactions",   price: "0.00005",  tier: "standard", icon: "📋" },
+                      { tool: "image_caption",             price: "0.00005",  tier: "standard", icon: "🖼" },
+                      { tool: "check_wallet_balance",      price: "0.0001",   tier: "heavy",    icon: "💰" },
+                      { tool: "code_review",               price: "0.0001",   tier: "heavy",    icon: "🛡" },
+                      { tool: "thirdweb_ai",               price: "0.0001",   tier: "heavy",    icon: "🔮" },
+                    ].map((row) => {
+                      const usd = row.price === "0" ? "$0.00" : `$${(parseFloat(row.price) * 3000).toFixed(4)}`;
+                      const tierColor =
+                        row.tier === "FREE"     ? "text-emerald-400" :
+                        row.tier === "light"    ? "text-blue-400" :
+                        row.tier === "medium"   ? "text-violet-400" :
+                        row.tier === "standard" ? "text-amber-400" :
+                        "text-red-400";
+                      return (
+                        <tr key={row.tool} className="hover:bg-white/5 transition-colors">
+                          <td className="px-3 py-2 text-gray-200">
+                            <span className="mr-2">{row.icon}</span>{row.tool}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-gray-300">
+                            {row.price === "0" ? "FREE" : row.price}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-500 hidden sm:table-cell">{usd}</td>
+                          <td className="px-3 py-2 text-right">
+                            <span className={cn("font-medium", tierColor)}>{row.tier}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-gray-600 mt-2 px-1">USD estimates at $3,000 / ETH</p>
+            </div>
+
+          </div>
         )}
 
         {/* ── LEDGER ── */}
