@@ -21,6 +21,10 @@ const TOOL_ICONS: Record<string, string> = {
   text_analysis: "🔬",
   code_review: "🛡",
   image_caption: "🖼",
+  thirdweb_ai: "🔮",
+  nft_data: "🎨",
+  read_contract: "📜",
+  ipfs: "📦",
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -41,6 +45,10 @@ const TOOL_LABELS: Record<string, string> = {
   text_analysis: "Text analysis",
   code_review: "Code review",
   image_caption: "Image caption",
+  thirdweb_ai: "Thirdweb AI",
+  nft_data: "NFT data",
+  read_contract: "Read contract",
+  ipfs: "IPFS",
 };
 
 // Blockchain tools get a special gold accent color

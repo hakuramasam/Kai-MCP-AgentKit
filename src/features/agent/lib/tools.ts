@@ -16,6 +16,10 @@ import {
   reviewCodeWithAI,
   captionImageWithAI,
 } from "@/features/agent/lib/ai-tools";
+import { queryNebula, isNebulaConfigured } from "@/features/agent/lib/thirdweb-ai";
+import { getNFTData, getWalletNFTs } from "@/features/agent/lib/thirdweb-nft";
+import { readContractFunction, resolveChainId } from "@/features/agent/lib/thirdweb-contract";
+import { uploadToIPFS, fetchFromIPFS } from "@/features/agent/lib/thirdweb-ipfs";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -184,6 +188,81 @@ export const imageCaptionSchema = z.object({
     ),
 });
 
+// ─── Thirdweb: Nebula AI ──────────────────────────────────────────────────────
+
+export const thirdwebAiSchema = z.object({
+  prompt: z
+    .string()
+    .describe(
+      "Natural language blockchain question, e.g. 'Explain this wallet 0x...', 'What does the USDC contract do?', 'Summarize the activity of 0x... on Base', 'What is the most popular NFT collection on Base?'",
+    ),
+  walletAddress: z
+    .string()
+    .optional()
+    .describe("Ethereum address to use as context for the query"),
+  contractAddress: z
+    .string()
+    .optional()
+    .describe("Contract address to use as context for the query"),
+  chainId: z
+    .number()
+    .optional()
+    .describe("Chain ID to focus the query on (e.g. 8453 for Base, 1 for Ethereum). Defaults to Base."),
+});
+
+// ─── Thirdweb: NFT data ───────────────────────────────────────────────────────
+
+export const nftDataSchema = z.object({
+  contractAddress: z.string().describe("NFT contract address (ERC-721 or ERC-1155)"),
+  tokenId: z
+    .number()
+    .optional()
+    .describe("Specific token ID to fetch. Omit to get collection info only."),
+  ownerAddress: z
+    .string()
+    .optional()
+    .describe("If provided, returns all NFTs owned by this address in the collection instead of a single token"),
+  chainId: z
+    .number()
+    .default(8453)
+    .describe("Chain ID (8453=Base, 1=Ethereum, 137=Polygon, 42161=Arbitrum, 10=Optimism). Defaults to Base."),
+});
+
+// ─── Thirdweb: Read contract ──────────────────────────────────────────────────
+
+export const readContractSchema = z.object({
+  contractAddress: z.string().describe("Contract address to call"),
+  abiFragment: z
+    .string()
+    .describe(
+      "Human-readable ABI function signature, e.g. 'function name() view returns (string)', 'function balanceOf(address) view returns (uint256)', 'function ownerOf(uint256) view returns (address)'",
+    ),
+  args: z
+    .array(z.string())
+    .default([])
+    .describe("Arguments to pass to the function, as strings (e.g. ['0x1234...', '42'])"),
+  chain: z
+    .string()
+    .default("base")
+    .describe("Chain name or ID: 'base', 'ethereum', 'polygon', 'arbitrum', 'optimism', or a numeric chain ID"),
+});
+
+// ─── Thirdweb: IPFS ───────────────────────────────────────────────────────────
+
+export const ipfsSchema = z.object({
+  action: z
+    .enum(["upload", "fetch"])
+    .describe("'upload' to store content on IPFS, 'fetch' to retrieve content by URI or CID"),
+  content: z
+    .string()
+    .optional()
+    .describe("Content to upload — a JSON string or plain text. Required when action='upload'."),
+  uri: z
+    .string()
+    .optional()
+    .describe("IPFS URI (ipfs://...), CID (Qm...), or gateway URL to fetch. Required when action='fetch'."),
+});
+
 // ─── Tool definitions for OpenRouter ─────────────────────────────────────────
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -333,6 +412,42 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       description:
         "Describe any image from a public URL using vision AI. Returns a caption, detailed description, detected objects, any visible text (OCR), dominant colors, mood, and content categories.",
       parameters: zodToJsonSchema(imageCaptionSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "thirdweb_ai",
+      description:
+        "Ask any natural language blockchain question powered by Thirdweb Nebula AI — trained on contracts and transactions across 2500+ EVM chains. Use for: 'explain this wallet', 'what does this contract do?', 'summarize activity for 0x...', 'what is the top NFT collection?', 'decode this transaction', 'what are common patterns in DeFi?'. Optionally ground the query with a wallet address, contract, or chain.",
+      parameters: zodToJsonSchema(thirdwebAiSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "nft_data",
+      description:
+        "Fetch NFT metadata, attributes, and ownership from any ERC-721 or ERC-1155 collection on Base, Ethereum, Polygon, Arbitrum, or Optimism. Can fetch a specific token by ID, or all NFTs owned by a wallet in a collection.",
+      parameters: zodToJsonSchema(nftDataSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_contract",
+      description:
+        "Call any read-only function on any EVM smart contract using a human-readable ABI fragment. Works on Base, Ethereum, Polygon, Arbitrum, and Optimism. Use for: checking token balances, reading contract state, fetching name/symbol/supply, getting prices from DeFi pools, querying governance contracts, and more.",
+      parameters: zodToJsonSchema(readContractSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ipfs",
+      description:
+        "Upload content to IPFS or fetch content from IPFS. Upload accepts JSON objects or plain text and returns an IPFS URI + multiple gateway URLs. Fetch retrieves any content by IPFS URI (ipfs://...), CID, or gateway URL.",
+      parameters: zodToJsonSchema(ipfsSchema),
     },
   },
 ];
@@ -619,6 +734,89 @@ export async function executeTool(
         const parsed = imageCaptionSchema.parse(args);
         const result = await captionImageWithAI(parsed.imageUrl);
         return JSON.stringify(result);
+      }
+
+      case "thirdweb_ai": {
+        const parsed = thirdwebAiSchema.parse(args);
+        const result = await queryNebula(parsed.prompt, {
+          walletAddress: parsed.walletAddress,
+          contractAddress: parsed.contractAddress,
+          chainId: parsed.chainId ?? 8453,
+        });
+        if (!result.success) {
+          return JSON.stringify({ error: result.error });
+        }
+        return JSON.stringify({
+          answer: result.message,
+          ...(result.actions && result.actions.length > 0 ? { actions: result.actions } : {}),
+          powered_by: "Thirdweb Nebula AI",
+        });
+      }
+
+      case "nft_data": {
+        const parsed = nftDataSchema.parse(args);
+        // If ownerAddress provided — fetch owned NFTs
+        if (parsed.ownerAddress) {
+          const result = await getWalletNFTs(
+            parsed.ownerAddress,
+            parsed.contractAddress,
+            parsed.chainId,
+          );
+          if (!result.success) return JSON.stringify({ error: result.error });
+          return JSON.stringify(result);
+        }
+        // Otherwise fetch single token
+        if (parsed.tokenId === undefined) {
+          return JSON.stringify({
+            error: "Please provide either a tokenId (to fetch a specific NFT) or an ownerAddress (to list NFTs owned by a wallet).",
+          });
+        }
+        const result = await getNFTData(
+          parsed.contractAddress,
+          parsed.tokenId,
+          parsed.chainId,
+        );
+        if (!result.success) return JSON.stringify({ error: result.error });
+        return JSON.stringify(result);
+      }
+
+      case "read_contract": {
+        const parsed = readContractSchema.parse(args);
+        const chainId = resolveChainId(parsed.chain);
+        const result = await readContractFunction(
+          parsed.contractAddress,
+          parsed.abiFragment,
+          parsed.args,
+          chainId,
+        );
+        if (!result.success) return JSON.stringify({ error: result.error });
+        return JSON.stringify(result);
+      }
+
+      case "ipfs": {
+        const parsed = ipfsSchema.parse(args);
+        if (parsed.action === "upload") {
+          if (!parsed.content) {
+            return JSON.stringify({ error: "content is required for action='upload'" });
+          }
+          // Try to parse as JSON object first, fall back to string
+          let uploadContent: string | Record<string, unknown> = parsed.content;
+          try {
+            uploadContent = JSON.parse(parsed.content) as Record<string, unknown>;
+          } catch {
+            uploadContent = parsed.content;
+          }
+          const result = await uploadToIPFS(uploadContent);
+          if (!result.success) return JSON.stringify({ error: result.error });
+          return JSON.stringify(result);
+        } else {
+          if (!parsed.uri) {
+            return JSON.stringify({ error: "uri is required for action='fetch'" });
+          }
+          const result = await fetchFromIPFS(parsed.uri);
+          if (!result.success) return JSON.stringify({ error: result.error });
+          return JSON.stringify(result);
+        }
       }
 
       default:

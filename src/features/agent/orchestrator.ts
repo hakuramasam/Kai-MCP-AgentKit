@@ -34,6 +34,12 @@ ON-CHAIN (Base Mainnet)
 - get_recent_transactions: recent tx history for any address
 - base_tx_lookup: full details of any tx by hash — status, value, gas, block, Basescan link
 
+THIRDWEB
+- thirdweb_ai: natural language blockchain questions via Nebula AI (trained on 2500+ EVM chains) — "explain this wallet", "what does this contract do?", "decode this tx", "top NFTs on Base"
+- nft_data: fetch NFT metadata, traits, ownership for any ERC-721/1155 on Base/ETH/Polygon/Arbitrum/Optimism
+- read_contract: call any read-only function on any EVM contract with a human-readable ABI fragment (e.g. balanceOf, name, ownerOf, totalSupply)
+- ipfs: upload JSON or text to IPFS and get back a CID + gateway URLs, or fetch any IPFS content by URI/CID
+
 A2A / MCP guidelines:
 - External agents can call this agent via /api/a2a (REST) or /api/mcp (MCP JSON-RPC)
 - Tool execution via A2A/MCP requires x402 ETH payment on Base — chat is always free
@@ -95,6 +101,10 @@ export const ORCHESTRATOR_CONFIG: AgentConfig = {
     "text_analysis",
     "code_review",
     "image_caption",
+    "thirdweb_ai",
+    "nft_data",
+    "read_contract",
+    "ipfs",
   ],
 };
 
