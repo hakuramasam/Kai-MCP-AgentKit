@@ -9,6 +9,13 @@ import {
 import { braveSearch, isBraveConfigured } from "@/features/agent/lib/brave-search";
 import { runJavaScript } from "@/features/agent/lib/code-runner";
 import { fetchUrl } from "@/features/agent/lib/fetch-url";
+import { getMarketData, getMultiMarketData } from "@/features/agent/lib/market-data";
+import { lookupTransaction } from "@/features/agent/lib/tx-lookup";
+import {
+  analyzeTextWithAI,
+  reviewCodeWithAI,
+  captionImageWithAI,
+} from "@/features/agent/lib/ai-tools";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -109,6 +116,72 @@ export const runCodeSchema = z.object({
     .string()
     .optional()
     .describe("Brief description of what the code does, shown in the UI"),
+});
+
+// ─── New: Market data ─────────────────────────────────────────────────────────
+
+export const marketDataSchema = z.object({
+  token: z
+    .string()
+    .describe(
+      "Cryptocurrency token name or ticker symbol (e.g. 'bitcoin', 'BTC', 'ethereum', 'ETH', 'solana', 'SOL')",
+    ),
+  vsCurrency: z
+    .string()
+    .default("usd")
+    .describe("Quote currency to price against, e.g. 'usd', 'eur', 'btc'. Defaults to USD."),
+  compareWith: z
+    .string()
+    .optional()
+    .describe("Optional second token to compare alongside the first"),
+});
+
+// ─── New: Base tx lookup ──────────────────────────────────────────────────────
+
+export const baseTxLookupSchema = z.object({
+  txHash: z
+    .string()
+    .describe(
+      "Base Mainnet transaction hash to look up (66-character hex string starting with 0x)",
+    ),
+});
+
+// ─── New: AI text analysis ────────────────────────────────────────────────────
+
+export const textAnalysisSchema = z.object({
+  text: z.string().describe("Text to analyze — can be any length up to ~8,000 characters"),
+  analysisType: z
+    .enum(["sentiment", "entities", "summarize", "keywords", "full"])
+    .default("full")
+    .describe(
+      "Type of analysis: 'sentiment' (positive/negative/neutral), 'entities' (people, orgs, places), 'summarize' (summary + key points), 'keywords' (important terms), 'full' (comprehensive analysis)",
+    ),
+});
+
+// ─── New: AI code review ──────────────────────────────────────────────────────
+
+export const codeReviewSchema = z.object({
+  code: z.string().describe("Source code to review (any language, up to ~12,000 characters)"),
+  language: z
+    .string()
+    .default("auto-detect")
+    .describe("Programming language (e.g. 'typescript', 'python', 'solidity'). Leave blank to auto-detect."),
+  focus: z
+    .enum(["security", "quality", "performance", "all"])
+    .default("all")
+    .describe(
+      "Review focus: 'security' (vulnerabilities), 'quality' (code style/patterns), 'performance' (efficiency), 'all' (comprehensive)",
+    ),
+});
+
+// ─── New: AI image caption ────────────────────────────────────────────────────
+
+export const imageCaptionSchema = z.object({
+  imageUrl: z
+    .string()
+    .describe(
+      "Public URL of the image to analyze (must be http:// or https://). Returns caption, description, detected objects/text, dominant colors, and mood.",
+    ),
 });
 
 // ─── Tool definitions for OpenRouter ─────────────────────────────────────────
@@ -215,6 +288,51 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       description:
         "Execute JavaScript code in a sandboxed environment and return stdout + return value. Use for: data transformation, complex calculations, string processing, sorting/filtering arrays, date math, generating structured output, or any logic that benefits from actual code over mental math. No network or filesystem access.",
       parameters: zodToJsonSchema(runCodeSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "market_data",
+      description:
+        "Get real-time cryptocurrency market data: price, 24h change, market cap, volume, ATH, and supply. Uses CoinGecko. Supports BTC, ETH, SOL, MATIC, OP, ARB, LINK, UNI, DOGE, AVAX, USDC, DEGEN, and hundreds more.",
+      parameters: zodToJsonSchema(marketDataSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "base_tx_lookup",
+      description:
+        "Look up the full details of any transaction on Base Mainnet by its hash: status, sender/receiver, ETH value, gas, block, timestamp, and a direct Basescan link.",
+      parameters: zodToJsonSchema(baseTxLookupSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "text_analysis",
+      description:
+        "AI-powered deep text analysis via LLM: sentiment analysis, named entity extraction (people, orgs, places), summarization with key points, keyword/topic extraction, readability scoring, or a full comprehensive report.",
+      parameters: zodToJsonSchema(textAnalysisSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "code_review",
+      description:
+        "AI-powered code review: security vulnerabilities, code quality issues, performance problems, and best practice improvements. Returns severity-ranked issues, an overall score, strengths, and actionable suggestions. Supports any programming language.",
+      parameters: zodToJsonSchema(codeReviewSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "image_caption",
+      description:
+        "Describe any image from a public URL using vision AI. Returns a caption, detailed description, detected objects, any visible text (OCR), dominant colors, mood, and content categories.",
+      parameters: zodToJsonSchema(imageCaptionSchema),
     },
   },
 ];
@@ -458,6 +576,49 @@ export async function executeTool(
         }
 
         return JSON.stringify(output);
+      }
+
+      case "market_data": {
+        const parsed = marketDataSchema.parse(args);
+        if (parsed.compareWith) {
+          const results = await getMultiMarketData(
+            [parsed.token, parsed.compareWith],
+            parsed.vsCurrency,
+          );
+          return JSON.stringify({ tokens: results, currency: parsed.vsCurrency.toUpperCase() });
+        }
+        const result = await getMarketData(parsed.token, parsed.vsCurrency);
+        if (!result.success) {
+          return JSON.stringify({ error: result.error });
+        }
+        return JSON.stringify(result.data);
+      }
+
+      case "base_tx_lookup": {
+        const parsed = baseTxLookupSchema.parse(args);
+        const result = await lookupTransaction(parsed.txHash);
+        if (!result.success) {
+          return JSON.stringify({ error: result.error });
+        }
+        return JSON.stringify(result.data);
+      }
+
+      case "text_analysis": {
+        const parsed = textAnalysisSchema.parse(args);
+        const result = await analyzeTextWithAI(parsed.text, parsed.analysisType);
+        return JSON.stringify(result);
+      }
+
+      case "code_review": {
+        const parsed = codeReviewSchema.parse(args);
+        const result = await reviewCodeWithAI(parsed.code, parsed.language, parsed.focus);
+        return JSON.stringify(result);
+      }
+
+      case "image_caption": {
+        const parsed = imageCaptionSchema.parse(args);
+        const result = await captionImageWithAI(parsed.imageUrl);
+        return JSON.stringify(result);
       }
 
       default:

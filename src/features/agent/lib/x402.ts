@@ -41,18 +41,23 @@ export const TOOL_PRICES: Record<string, string> = {
   calculator: "0.00001",
   get_weather: "0.00001",
   analyze_data: "0.00001",
+  market_data: "0.00001",      // CoinGecko free tier, minimal cost
+  base_tx_lookup: "0.00001",   // RPC read-only, very cheap
 
   // Medium tools — 0.00003 ETH (~$0.09)
   save_memory: "0.00003",
   recall_memory: "0.00003",
   web_search: "0.00003",
+  text_analysis: "0.00003",    // LLM inference (fast model)
 
   // Heavy tools — 0.00005 ETH (~$0.15)
   fetch_url: "0.00005",
   run_code: "0.00005",
   get_recent_transactions: "0.00005",
+  image_caption: "0.00005",    // Vision model inference
 
-  // On-chain tools — 0.0001 ETH (~$0.30)
+  // AI-heavy tools — 0.0001 ETH (~$0.30)
+  code_review: "0.0001",       // Larger model + longer output
   check_wallet_balance: "0.0001",
   send_eth: "0.0001",
 

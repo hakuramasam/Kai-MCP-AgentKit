@@ -16,6 +16,11 @@ const TOOL_ICONS: Record<string, string> = {
   get_recent_transactions: "📋",
   run_code: "⚡",
   fetch_url: "🌐",
+  market_data: "📈",
+  base_tx_lookup: "🔗",
+  text_analysis: "🔬",
+  code_review: "🛡",
+  image_caption: "🖼",
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -31,10 +36,21 @@ const TOOL_LABELS: Record<string, string> = {
   get_recent_transactions: "Fetching txns",
   run_code: "Running code",
   fetch_url: "Fetching URL",
+  market_data: "Market data",
+  base_tx_lookup: "Tx lookup",
+  text_analysis: "Text analysis",
+  code_review: "Code review",
+  image_caption: "Image caption",
 };
 
 // Blockchain tools get a special gold accent color
-const BLOCKCHAIN_TOOLS = new Set(["check_wallet_balance", "send_eth", "get_recent_transactions"]);
+const BLOCKCHAIN_TOOLS = new Set([
+  "check_wallet_balance",
+  "send_eth",
+  "get_recent_transactions",
+  "base_tx_lookup",
+  "market_data",
+]);
 
 interface ToolBadgeProps {
   activity: ToolActivity;
