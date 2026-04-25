@@ -30,6 +30,7 @@ import {
   recallMemoriesSemantic,
 } from "@/features/agent/lib/vector-memory";
 import { enforceRateLimit } from "@/features/agent/lib/rate-limiter";
+import { recordPayment, recordToolCall } from "@/db/actions/payment-actions";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -221,10 +222,24 @@ export async function POST(req: NextRequest) {
 
     // Issue a reusable token so caller doesn't need to pay per-request
     if (req.headers.get("x-payment") && !req.headers.get("x-payment-token")) {
-      const [txHash] = (req.headers.get("x-payment") ?? "").split(":");
+      const [txHash, nonce] = (req.headers.get("x-payment") ?? "").split(":");
       const token = issueToken({ txHash, toolName: tool, paidBy: payment.paidBy });
 
+      // Persist payment to ledger (non-blocking)
+      void recordPayment({
+        txHash: txHash ?? "",
+        nonce: nonce ?? "",
+        paidBy: payment.paidBy ?? "unknown",
+        toolName: tool,
+        amountEth: getToolPrice(tool),
+        endpoint: "a2a",
+        tokenIssued: token.token,
+      });
+
+      const start = Date.now();
       const result = await runTool(tool, args, fid);
+      void recordToolCall({ toolName: tool, source: "a2a", callerAddress: payment.paidBy, success: true, durationMs: Date.now() - start });
+
       return NextResponse.json(
         { result, token: token.token, tokenExpiresAt: token.expiresAt },
         {
@@ -238,7 +253,9 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Execute tool ────────────────────────────────────────────────────────────
+  const start = Date.now();
   const result = await runTool(tool, args, fid);
+  void recordToolCall({ toolName: tool, source: "a2a", callerAddress: undefined, success: true, durationMs: Date.now() - start });
   return NextResponse.json({ result });
 }
 

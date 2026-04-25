@@ -28,6 +28,7 @@ import {
   recallMemoriesSemantic,
 } from "@/features/agent/lib/vector-memory";
 import { enforceRateLimit } from "@/features/agent/lib/rate-limiter";
+import { recordPayment, recordToolCall } from "@/db/actions/payment-actions";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -247,9 +248,23 @@ export async function POST(req: NextRequest) {
 
       // Issue token on first payment
       if (req.headers.get("x-payment") && !req.headers.get("x-payment-token")) {
-        const [txHash] = (req.headers.get("x-payment") ?? "").split(":");
+        const [txHash, nonce] = (req.headers.get("x-payment") ?? "").split(":");
         const token = issueToken({ txHash, toolName, paidBy: payment.paidBy });
+
+        // Persist payment (non-blocking)
+        void recordPayment({
+          txHash: txHash ?? "",
+          nonce: nonce ?? "",
+          paidBy: payment.paidBy ?? "unknown",
+          toolName,
+          amountEth: getToolPrice(toolName),
+          endpoint: "mcp",
+          tokenIssued: token.token,
+        });
+
+        const start = Date.now();
         const result = await callTool(toolName, p.arguments, 0);
+        void recordToolCall({ toolName, source: "mcp", callerAddress: payment.paidBy, success: true, durationMs: Date.now() - start });
 
         return NextResponse.json(
           ok(id, { content: [{ type: "text", text: formatToolResult(result) }] }),
@@ -265,11 +280,14 @@ export async function POST(req: NextRequest) {
 
     // ── Execute ───────────────────────────────────────────────────────────────
     try {
+      const start = Date.now();
       const result = await callTool(toolName, p.arguments, 0);
+      void recordToolCall({ toolName, source: "mcp", success: true, durationMs: Date.now() - start });
       return jsonrpcOk(id, {
         content: [{ type: "text", text: formatToolResult(result) }],
       });
     } catch (e) {
+      void recordToolCall({ toolName, source: "mcp", success: false });
       return jsonrpcError(id, MCP_INTERNAL_ERROR, `Tool execution failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }

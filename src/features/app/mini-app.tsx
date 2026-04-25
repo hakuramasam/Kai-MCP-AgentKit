@@ -3,14 +3,22 @@
 import { useState, useEffect } from "react";
 import { useFarcasterUser } from "@/neynar-farcaster-sdk/mini";
 import { ChatView } from "@/features/agent/chat-view";
+import { AdminDashboard } from "@/features/agent/components/admin-dashboard";
 import { createSession, getUserSessions } from "@/db/actions/chat-actions";
+import { cn } from "@neynar/ui";
+
+const CREATOR_FID = parseInt(process.env.NEXT_PUBLIC_USER_FID ?? "0", 10);
+
+type AppTab = "chat" | "admin";
 
 export function MiniApp() {
   const { data: user } = useFarcasterUser();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<AppTab>("chat");
 
   const fid = user?.fid ?? 0;
+  const isCreator = CREATOR_FID > 0 && fid === CREATOR_FID;
 
   // Initialize or load session
   useEffect(() => {
@@ -56,11 +64,50 @@ export function MiniApp() {
   }
 
   return (
-    <ChatView
-      fid={fid}
-      sessionId={sessionId}
-      onNewSession={handleNewSession}
-      onSessionSelect={handleSessionSelect}
-    />
+    <div className="flex flex-col h-dvh bg-[#0a0a0f]">
+      {/* Admin tab bar — only shown to the creator */}
+      {isCreator && (
+        <div className="flex-shrink-0 flex items-center gap-1 px-3 pt-2 pb-1 border-b border-white/10">
+          <button
+            onClick={() => setActiveTab("chat")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              activeTab === "chat"
+                ? "bg-violet-600 text-white"
+                : "text-gray-400 hover:text-white hover:bg-white/5",
+            )}
+          >
+            <span>💬</span>
+            <span>Chat</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("admin")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              activeTab === "admin"
+                ? "bg-violet-600 text-white"
+                : "text-gray-400 hover:text-white hover:bg-white/5",
+            )}
+          >
+            <span>📊</span>
+            <span>Admin</span>
+          </button>
+        </div>
+      )}
+
+      {/* Main content */}
+      <div className="flex-1 overflow-hidden">
+        {activeTab === "chat" || !isCreator ? (
+          <ChatView
+            fid={fid}
+            sessionId={sessionId}
+            onNewSession={handleNewSession}
+            onSessionSelect={handleSessionSelect}
+          />
+        ) : (
+          <AdminDashboard fid={fid} />
+        )}
+      </div>
+    </div>
   );
 }
