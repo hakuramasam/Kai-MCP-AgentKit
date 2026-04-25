@@ -27,6 +27,7 @@ import {
   saveMemoryWithEmbedding,
   recallMemoriesSemantic,
 } from "@/features/agent/lib/vector-memory";
+import { enforceRateLimit } from "@/features/agent/lib/rate-limiter";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -79,6 +80,30 @@ export async function POST(req: NextRequest) {
   }
 
   const { method, params, id } = rpc;
+
+  // ── Rate limit — skip for free/meta methods ──────────────────────────────
+  const freeMethods = new Set(["initialize", "tools/list", "notifications/initialized"]);
+  if (!freeMethods.has(method)) {
+    const rl = enforceRateLimit(req);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        err(id, -32029, "Too many requests", {
+          retryAfter: Math.ceil((rl.resetAt - Date.now()) / 1000),
+          limit: "60 requests/minute per IP (unauthenticated)",
+          upgrade: "Pay with x402 to get 300 requests/minute tied to your address",
+        }),
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.ceil((rl.resetAt - Date.now()) / 1000)),
+            "X-RateLimit-Limit": "60",
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(Math.floor(rl.resetAt / 1000)),
+          },
+        },
+      );
+    }
+  }
 
   // ── initialize ──────────────────────────────────────────────────────────────
   if (method === "initialize") {
@@ -145,6 +170,7 @@ export async function POST(req: NextRequest) {
       const payment = await checkPayment(req, toolName);
 
       if (!payment.paid) {
+        // Nothing to charge back — just issue challenge
         const paymentData = {
           ...payment.challenge,
           instructions: [
@@ -166,6 +192,28 @@ export async function POST(req: NextRequest) {
             },
           },
         );
+      }
+
+      // Payment verified — upgrade to address-level rate limit
+      if (payment.paidBy) {
+        const addrRl = enforceRateLimit(req, payment.paidBy);
+        if (!addrRl.allowed) {
+          return NextResponse.json(
+            err(id, -32029, "Too many requests", {
+              retryAfter: Math.ceil((addrRl.resetAt - Date.now()) / 1000),
+              limit: "300 requests/minute per paying address",
+            }),
+            {
+              status: 429,
+              headers: {
+                "Retry-After": String(Math.ceil((addrRl.resetAt - Date.now()) / 1000)),
+                "X-RateLimit-Limit": "300",
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": String(Math.floor(addrRl.resetAt / 1000)),
+              },
+            },
+          );
+        }
       }
 
       // Issue token on first payment

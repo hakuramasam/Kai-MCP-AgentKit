@@ -29,6 +29,7 @@ import {
   saveMemoryWithEmbedding,
   recallMemoriesSemantic,
 } from "@/features/agent/lib/vector-memory";
+import { enforceRateLimit } from "@/features/agent/lib/rate-limiter";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -79,6 +80,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing required field: tool" }, { status: 400 });
   }
 
+  // ── Rate limit — IP only at this point (address resolved after payment) ────
+  // We'll re-check after payment to swap to the generous address limit.
+  const earlyRl = enforceRateLimit(req);
+  if (!earlyRl.allowed) {
+    return NextResponse.json(
+      {
+        error: "Too many requests",
+        retryAfter: Math.ceil((earlyRl.resetAt - Date.now()) / 1000),
+        limit: "60 requests/minute per IP (unauthenticated)",
+        upgrade: "Pay with x402 to get 300 requests/minute tied to your address",
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil((earlyRl.resetAt - Date.now()) / 1000)),
+          "X-RateLimit-Limit": "60",
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(Math.floor(earlyRl.resetAt / 1000)),
+        },
+      },
+    );
+  }
+
   // Verify tool exists
   const toolDef = TOOL_DEFINITIONS.find((t) => t.function.name === tool);
   if (!toolDef) {
@@ -101,6 +125,7 @@ export async function POST(req: NextRequest) {
     const payment = await checkPayment(req, tool);
 
     if (!payment.paid) {
+      // Charge the IP slot back — this request won't proceed
       return NextResponse.json(
         {
           error: "Payment required",
@@ -125,6 +150,29 @@ export async function POST(req: NextRequest) {
           },
         },
       );
+    }
+
+    // Payment verified — swap to the generous address-level rate limit
+    if (payment.paidBy) {
+      const addrRl = enforceRateLimit(req, payment.paidBy);
+      if (!addrRl.allowed) {
+        return NextResponse.json(
+          {
+            error: "Too many requests",
+            retryAfter: Math.ceil((addrRl.resetAt - Date.now()) / 1000),
+            limit: "300 requests/minute per paying address",
+          },
+          {
+            status: 429,
+            headers: {
+              "Retry-After": String(Math.ceil((addrRl.resetAt - Date.now()) / 1000)),
+              "X-RateLimit-Limit": "300",
+              "X-RateLimit-Remaining": "0",
+              "X-RateLimit-Reset": String(Math.floor(addrRl.resetAt / 1000)),
+            },
+          },
+        );
+      }
     }
 
     // Issue a reusable token so caller doesn't need to pay per-request
