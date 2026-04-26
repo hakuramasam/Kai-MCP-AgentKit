@@ -17,6 +17,7 @@ import {
   captionImageWithAI,
 } from "@/features/agent/lib/ai-tools";
 import { queryNebula, isNebulaConfigured } from "@/features/agent/lib/thirdweb-ai";
+import { deployContract } from "@/features/agent/lib/thirdweb-deploy";
 import { getNFTData, getWalletNFTs } from "@/features/agent/lib/thirdweb-nft";
 import { readContractFunction, resolveChainId } from "@/features/agent/lib/thirdweb-contract";
 import { uploadToIPFS, fetchFromIPFS } from "@/features/agent/lib/thirdweb-ipfs";
@@ -186,6 +187,34 @@ export const imageCaptionSchema = z.object({
     .describe(
       "Public URL of the image to analyze (must be http:// or https://). Returns caption, description, detected objects/text, dominant colors, and mood.",
     ),
+});
+
+// ─── Thirdweb: Deploy contract ────────────────────────────────────────────────
+
+export const deployContractSchema = z.object({
+  description: z
+    .string()
+    .describe(
+      "Plain English description of the contract to deploy, e.g. 'an ERC-721 NFT collection called CoolCats with a max supply of 10,000' or 'an ERC-20 token called MyToken with symbol MTK and 1 million supply'",
+    ),
+  contractType: z
+    .enum(["ERC-20", "ERC-721", "ERC-1155", "custom"])
+    .optional()
+    .describe("Token standard or contract type. Omit to let Nebula infer from description."),
+  name: z.string().optional().describe("Token or contract name, e.g. 'CoolCats'"),
+  symbol: z.string().optional().describe("Token symbol, e.g. 'COOL'"),
+  chainId: z
+    .number()
+    .default(8453)
+    .describe("Target chain ID. Defaults to Base Mainnet (8453). Also supports Ethereum (1), Polygon (137), Arbitrum (42161), Optimism (10)."),
+  walletAddress: z
+    .string()
+    .optional()
+    .describe("Deployer wallet address — provides context to Nebula for gas estimation"),
+  extraParams: z
+    .string()
+    .optional()
+    .describe("Any extra constructor parameters or requirements, e.g. 'royalty 5%, mint price 0.01 ETH, allowlist enabled'"),
 });
 
 // ─── Thirdweb: Nebula AI ──────────────────────────────────────────────────────
@@ -412,6 +441,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       description:
         "Describe any image from a public URL using vision AI. Returns a caption, detailed description, detected objects, any visible text (OCR), dominant colors, mood, and content categories.",
       parameters: zodToJsonSchema(imageCaptionSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "deploy_contract",
+      description:
+        "Deploy a smart contract on Base (or any EVM chain) using Thirdweb Nebula AI. Supports ERC-20 tokens, ERC-721 NFT collections, ERC-1155 multi-tokens, and custom contracts. Describe what you want in plain English — Nebula generates the deployment parameters, constructor args, and transaction data. Returns deployment steps, estimated gas, and a Thirdweb dashboard link.",
+      parameters: zodToJsonSchema(deployContractSchema),
     },
   },
   {
@@ -734,6 +772,31 @@ export async function executeTool(
         const parsed = imageCaptionSchema.parse(args);
         const result = await captionImageWithAI(parsed.imageUrl);
         return JSON.stringify(result);
+      }
+
+      case "deploy_contract": {
+        const parsed = deployContractSchema.parse(args);
+        const result = await deployContract({
+          description:   parsed.description,
+          contractType:  parsed.contractType,
+          name:          parsed.name,
+          symbol:        parsed.symbol,
+          chainId:       parsed.chainId,
+          walletAddress: parsed.walletAddress,
+          extraParams:   parsed.extraParams,
+        });
+        if (!result.success) return JSON.stringify({ error: result.error });
+        return JSON.stringify({
+          message:         result.message,
+          contractAddress: result.contractAddress ?? null,
+          txHash:          result.txHash ?? null,
+          dashboardUrl:    result.dashboardUrl,
+          actions:         result.actions?.length ? result.actions : undefined,
+          powered_by:      "Thirdweb Nebula AI",
+          note: !result.contractAddress
+            ? "Nebula has generated the deployment details above. To complete the on-chain deployment, use the Thirdweb dashboard or sign the transaction with your wallet."
+            : undefined,
+        });
       }
 
       case "thirdweb_ai": {
