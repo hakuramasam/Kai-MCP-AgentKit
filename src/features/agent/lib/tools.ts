@@ -785,17 +785,24 @@ export async function executeTool(
           walletAddress: parsed.walletAddress,
           extraParams:   parsed.extraParams,
         });
-        if (!result.success) return JSON.stringify({ error: result.error });
+
+        if (!result.success && !result.message) {
+          return JSON.stringify({ error: result.error });
+        }
+
         return JSON.stringify({
+          deployed:        result.deployed,
           message:         result.message,
           contractAddress: result.contractAddress ?? null,
           txHash:          result.txHash ?? null,
+          gasCost:         result.gasCost ?? null,
           dashboardUrl:    result.dashboardUrl,
-          actions:         result.actions?.length ? result.actions : undefined,
+          explorerUrl:     result.explorerUrl ?? null,
           powered_by:      "Thirdweb Nebula AI",
-          note: !result.contractAddress
-            ? "Nebula has generated the deployment details above. To complete the on-chain deployment, use the Thirdweb dashboard or sign the transaction with your wallet."
-            : undefined,
+          ...(result.error   ? { warning: result.error }  : {}),
+          status: result.deployed
+            ? "✅ Contract deployed on-chain automatically"
+            : "📋 Deployment guide ready — add WALLET_PRIVATE_KEY for automated on-chain deploy, or use the Thirdweb dashboard link above",
         });
       }
 

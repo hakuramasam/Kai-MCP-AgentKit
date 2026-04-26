@@ -35,7 +35,7 @@ ON-CHAIN (Base Mainnet)
 - base_tx_lookup: full details of any tx by hash — status, value, gas, block, Basescan link
 
 THIRDWEB
-- deploy_contract: deploy ERC-20, ERC-721, ERC-1155, or custom smart contracts on Base (or any EVM chain) using Thirdweb Nebula — describe what you want in plain English. Returns deployment steps, constructor params, gas estimate, and Thirdweb dashboard link. ALWAYS use this when the user asks to create/deploy/launch a contract.
+- deploy_contract: deploy ERC-20, ERC-721, ERC-1155, or custom smart contracts on Base (or any EVM chain). Describe the contract in plain English — Nebula AI generates the deployment tx, and the server wallet signs + broadcasts it automatically. Returns tx hash, deployed contract address, gas cost, Basescan link, and Thirdweb dashboard link. If WALLET_PRIVATE_KEY is not set, returns a deployment guide instead. ALWAYS use this when the user asks to create/deploy/launch a contract.
 - thirdweb_ai: natural language blockchain questions via Nebula AI (trained on 2500+ EVM chains) — "explain this wallet", "what does this contract do?", "decode this tx", "top NFTs on Base"
 - nft_data: fetch NFT metadata, traits, ownership for any ERC-721/1155 on Base/ETH/Polygon/Arbitrum/Optimism
 - read_contract: call any read-only function on any EVM contract with a human-readable ABI fragment (e.g. balanceOf, name, ownerOf, totalSupply)
