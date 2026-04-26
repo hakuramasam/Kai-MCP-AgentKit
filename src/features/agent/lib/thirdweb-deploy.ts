@@ -1,50 +1,74 @@
 /**
- * Thirdweb contract deployment via Nebula AI + server wallet.
+ * Thirdweb contract deployment using native SDK v5 functions.
+ *
+ * Uses deployERC20Contract, deployERC721Contract, deployERC1155Contract from
+ * thirdweb/deploys — no Nebula AI intermediary for standard token types.
+ *
+ * For custom contracts, falls back to Nebula AI + viem broadcast path.
  *
  * Flow:
- *   1. Send deployment description to Nebula AI — it returns the
- *      deployment transaction (to, data, value) in its actions array.
- *   2. Sign + broadcast the tx with the server wallet (WALLET_PRIVATE_KEY via viem).
- *   3. Wait for the receipt and extract the deployed contract address.
- *   4. Return the tx hash, contract address, and Thirdweb dashboard link.
- *
- * If WALLET_PRIVATE_KEY is not set, falls back to returning Nebula's
- * deployment guide only (manual deploy via Thirdweb dashboard).
+ *   1. Parse contractType from description
+ *   2. Use native deployERC*Contract with thirdweb privateKeyToAccount
+ *   3. Return tx hash, deployed contract address, gas cost, dashboard link
  */
 
+import { createThirdwebClient } from "thirdweb";
+import { base } from "thirdweb/chains";
+import { privateKeyToAccount } from "thirdweb/wallets";
+import {
+  deployERC20Contract,
+  deployERC721Contract,
+  deployERC1155Contract,
+} from "thirdweb/deploys";
 import {
   createWalletClient,
   createPublicClient,
   http,
-  parseEther,
   formatEther,
   type Hex,
   type Address,
 } from "viem";
-import { base } from "viem/chains";
-import { privateKeyToAccount } from "viem/accounts";
+import { base as viemBase } from "viem/chains";
+import { privateKeyToAccount as viemPrivateKeyToAccount } from "viem/accounts";
 
 const NEBULA_BASE = "https://nebula-api.thirdweb.com";
 const BASE_RPC    = process.env.BASE_RPC_URL ?? "https://mainnet.base.org";
 
-function getDeployWallet() {
+// ─── Client factory ────────────────────────────────────────────────────────────
+
+function getThirdwebClient() {
+  const clientId = process.env.THIRDWEB_CLIENT_ID;
+  if (!clientId) throw new Error("THIRDWEB_CLIENT_ID is not configured. Get a free key at thirdweb.com/dashboard");
+  return createThirdwebClient({ clientId });
+}
+
+function getThirdwebAccount() {
   const rawKey = process.env.WALLET_PRIVATE_KEY;
   if (!rawKey?.startsWith("0x") || rawKey.length !== 66) return null;
-  const account      = privateKeyToAccount(rawKey as `0x${string}`);
-  const walletClient = createWalletClient({ account, chain: base, transport: http(BASE_RPC) });
-  const publicClient = createPublicClient({ chain: base, transport: http(BASE_RPC) });
+  const client = getThirdwebClient();
+  return privateKeyToAccount({ privateKey: rawKey as `0x${string}`, client });
+}
+
+function getViemWallet() {
+  const rawKey = process.env.WALLET_PRIVATE_KEY;
+  if (!rawKey?.startsWith("0x") || rawKey.length !== 66) return null;
+  const account      = viemPrivateKeyToAccount(rawKey as `0x${string}`);
+  const walletClient = createWalletClient({ account, chain: viemBase, transport: http(BASE_RPC) });
+  const publicClient = createPublicClient({ chain: viemBase, transport: http(BASE_RPC) });
   return { account, walletClient, publicClient };
 }
 
+// ─── Result type ───────────────────────────────────────────────────────────────
+
 export interface DeployResult {
   success: boolean;
-  /** Human-readable answer from Nebula (deployment steps, ABI notes, etc.) */
+  /** Human-readable answer or summary */
   message?: string;
-  /** Whether the tx was broadcast on-chain automatically */
+  /** Whether the contract was broadcast on-chain automatically */
   deployed: boolean;
   /** On-chain deployment transaction hash */
   txHash?: string;
-  /** Deployed contract address (from receipt logs) */
+  /** Deployed contract address */
   contractAddress?: string;
   /** ETH spent on gas */
   gasCost?: string;
@@ -52,21 +76,13 @@ export interface DeployResult {
   dashboardUrl?: string;
   /** Basescan tx link */
   explorerUrl?: string;
-  /** Raw Nebula actions (for advanced callers) */
+  /** Raw Nebula actions (custom contract path only) */
   actions?: Array<{ type: string; data: unknown }>;
   error?: string;
 }
 
-/**
- * Deploy a smart contract on Base using Thirdweb Nebula AI + server wallet.
- *
- * Steps:
- *   1. Ask Nebula to produce a deploy transaction for the described contract.
- *   2. Extract the tx payload from Nebula's actions array.
- *   3. If WALLET_PRIVATE_KEY is set: sign + broadcast on-chain automatically,
- *      wait for the receipt, and return the deployed contract address.
- *   4. If not set: return Nebula's deployment guide for manual deploy.
- */
+// ─── Main deploy entry point ───────────────────────────────────────────────────
+
 export async function deployContract(params: {
   description: string;
   contractType?: string;
@@ -76,6 +92,211 @@ export async function deployContract(params: {
   walletAddress?: string;
   extraParams?: string;
 }): Promise<DeployResult> {
+  const chainId = params.chainId ?? 8453;
+
+  // Determine which path to use
+  const type = params.contractType?.toUpperCase() ?? inferContractType(params.description);
+
+  if (type === "ERC-20" || type === "ERC20") {
+    return deployNativeERC20(params);
+  }
+  if (type === "ERC-721" || type === "ERC721") {
+    return deployNativeERC721(params);
+  }
+  if (type === "ERC-1155" || type === "ERC1155") {
+    return deployNativeERC1155(params);
+  }
+
+  // Custom contract — use Nebula AI + viem broadcast
+  return deployWithNebula(params, chainId);
+}
+
+// ─── Infer contract type from description ─────────────────────────────────────
+
+function inferContractType(description: string): string {
+  const lower = description.toLowerCase();
+  if (lower.includes("erc-20") || lower.includes("erc20") || lower.includes("token") || lower.includes("fungible")) return "ERC-20";
+  if (lower.includes("erc-1155") || lower.includes("erc1155") || lower.includes("multi-token") || lower.includes("semi-fungible")) return "ERC-1155";
+  if (lower.includes("erc-721") || lower.includes("erc721") || lower.includes("nft") || lower.includes("collection") || lower.includes("non-fungible")) return "ERC-721";
+  return "custom";
+}
+
+// ─── Native ERC-20 deploy ──────────────────────────────────────────────────────
+
+async function deployNativeERC20(params: {
+  name?: string;
+  symbol?: string;
+  description: string;
+  extraParams?: string;
+}): Promise<DeployResult> {
+  try {
+    const account = getThirdwebAccount();
+    if (!account) {
+      return {
+        success: false,
+        deployed: false,
+        error: "WALLET_PRIVATE_KEY is not configured. Add it to .env to enable automated deployment.",
+        dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
+      };
+    }
+
+    const client = getThirdwebClient();
+    const name   = params.name ?? extractName(params.description) ?? "MyToken";
+    const symbol = params.symbol ?? extractSymbol(params.description) ?? "MTK";
+
+    const contractAddress = await deployERC20Contract({
+      chain: base,
+      client,
+      account,
+      type: "TokenERC20",
+      params: {
+        name,
+        symbol,
+        description: params.description,
+        primarySaleRecipient: (account as { address: string }).address,
+      },
+    });
+
+    const dashboardUrl = `https://thirdweb.com/8453/${contractAddress}`;
+    return {
+      success: true,
+      deployed: true,
+      message: `ERC-20 token "${name}" (${symbol}) deployed successfully on Base Mainnet.`,
+      contractAddress,
+      dashboardUrl,
+      explorerUrl: `https://basescan.org/address/${contractAddress}`,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      deployed: false,
+      error: `ERC-20 deployment failed: ${err instanceof Error ? err.message : String(err)}`,
+      dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
+    };
+  }
+}
+
+// ─── Native ERC-721 deploy ────────────────────────────────────────────────────
+
+async function deployNativeERC721(params: {
+  name?: string;
+  symbol?: string;
+  description: string;
+  extraParams?: string;
+}): Promise<DeployResult> {
+  try {
+    const account = getThirdwebAccount();
+    if (!account) {
+      return {
+        success: false,
+        deployed: false,
+        error: "WALLET_PRIVATE_KEY is not configured. Add it to .env to enable automated deployment.",
+        dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
+      };
+    }
+
+    const client = getThirdwebClient();
+    const name   = params.name ?? extractName(params.description) ?? "MyNFT";
+    const symbol = params.symbol ?? extractSymbol(params.description) ?? "NFT";
+
+    const contractAddress = await deployERC721Contract({
+      chain: base,
+      client,
+      account,
+      type: "TokenERC721",
+      params: {
+        name,
+        symbol,
+        description: params.description,
+        primarySaleRecipient: (account as { address: string }).address,
+      },
+    });
+
+    const dashboardUrl = `https://thirdweb.com/8453/${contractAddress}`;
+    return {
+      success: true,
+      deployed: true,
+      message: `ERC-721 NFT collection "${name}" (${symbol}) deployed on Base Mainnet.`,
+      contractAddress,
+      dashboardUrl,
+      explorerUrl: `https://basescan.org/address/${contractAddress}`,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      deployed: false,
+      error: `ERC-721 deployment failed: ${err instanceof Error ? err.message : String(err)}`,
+      dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
+    };
+  }
+}
+
+// ─── Native ERC-1155 deploy ───────────────────────────────────────────────────
+
+async function deployNativeERC1155(params: {
+  name?: string;
+  symbol?: string;
+  description: string;
+  extraParams?: string;
+}): Promise<DeployResult> {
+  try {
+    const account = getThirdwebAccount();
+    if (!account) {
+      return {
+        success: false,
+        deployed: false,
+        error: "WALLET_PRIVATE_KEY is not configured. Add it to .env to enable automated deployment.",
+        dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
+      };
+    }
+
+    const client = getThirdwebClient();
+    const name   = params.name ?? extractName(params.description) ?? "MyMultiToken";
+    const symbol = params.symbol ?? extractSymbol(params.description) ?? "MTT";
+
+    const contractAddress = await deployERC1155Contract({
+      chain: base,
+      client,
+      account,
+      type: "TokenERC1155",
+      params: {
+        name,
+        symbol,
+        description: params.description,
+        primarySaleRecipient: (account as { address: string }).address,
+      },
+    });
+
+    const dashboardUrl = `https://thirdweb.com/8453/${contractAddress}`;
+    return {
+      success: true,
+      deployed: true,
+      message: `ERC-1155 multi-token contract "${name}" (${symbol}) deployed on Base Mainnet.`,
+      contractAddress,
+      dashboardUrl,
+      explorerUrl: `https://basescan.org/address/${contractAddress}`,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      deployed: false,
+      error: `ERC-1155 deployment failed: ${err instanceof Error ? err.message : String(err)}`,
+      dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
+    };
+  }
+}
+
+// ─── Nebula AI path for custom contracts ────────────────────────────────────────
+
+async function deployWithNebula(params: {
+  description: string;
+  contractType?: string;
+  name?: string;
+  symbol?: string;
+  chainId?: number;
+  walletAddress?: string;
+  extraParams?: string;
+}, chainId: number): Promise<DeployResult> {
   const secretKey = process.env.THIRDWEB_SECRET_KEY;
   if (!secretKey) {
     return {
@@ -85,26 +306,22 @@ export async function deployContract(params: {
     };
   }
 
-  const chainId    = params.chainId ?? 8453;
-  const chainName  = chainId === 8453 ? "Base Mainnet" : `chain ${chainId}`;
-  const wallet     = getDeployWallet();
-
-  // If we have a wallet, tell Nebula which address will deploy (better gas estimates)
+  const wallet    = getViemWallet();
+  const chainName = chainId === 8453 ? "Base Mainnet" : `chain ${chainId}`;
   const deployerAddress = wallet?.account.address ?? params.walletAddress;
-  const contractType    = params.contractType ?? "smart contract";
 
   const prompt = [
-    `Deploy a ${contractType} on ${chainName}.`,
+    `Deploy a ${params.contractType ?? "smart contract"} on ${chainName}.`,
     `Description: ${params.description}`,
-    params.name    ? `Token name: ${params.name}`     : null,
-    params.symbol  ? `Token symbol: ${params.symbol}` : null,
+    params.name   ? `Token name: ${params.name}`     : null,
+    params.symbol ? `Token symbol: ${params.symbol}` : null,
     params.extraParams ?? null,
     deployerAddress ? `Deployer wallet: ${deployerAddress}` : null,
     "Return the complete deployment transaction in your actions array with fields: to, data, value.",
     "Include constructor parameters, estimated gas cost, and a brief explanation.",
   ].filter(Boolean).join(" ");
 
-  // ── Step 1: Ask Nebula ─────────────────────────────────────────────────────
+  // Ask Nebula
   let nebulaMessage = "";
   let nebulaActions: Array<{ type: string; data: Record<string, unknown> }> = [];
 
@@ -116,7 +333,7 @@ export async function deployContract(params: {
         message: prompt,
         stream: false,
         context: {
-          chain_ids:      [String(chainId)],
+          chain_ids: [String(chainId)],
           ...(deployerAddress ? { wallet_address: deployerAddress } : {}),
         },
       }),
@@ -142,13 +359,12 @@ export async function deployContract(params: {
     };
   }
 
-  // ── Step 2: Extract tx payload from Nebula actions ─────────────────────────
+  // Extract tx payload from Nebula actions
   interface TxPayload { to?: string; data?: string; value?: string }
   let txPayload: TxPayload | null = null;
 
   for (const action of nebulaActions) {
     const d = action.data ?? {};
-    // Nebula may return a "transaction" action with to/data/value
     if (d.to && (d.data || d.input)) {
       txPayload = {
         to:    String(d.to),
@@ -157,7 +373,6 @@ export async function deployContract(params: {
       };
       break;
     }
-    // Or it may nest the tx under a "transaction" key
     if (d.transaction && typeof d.transaction === "object") {
       const tx = d.transaction as Record<string, unknown>;
       if (tx.to) {
@@ -171,16 +386,12 @@ export async function deployContract(params: {
     }
   }
 
-  // ── Step 3a: Auto-broadcast if wallet is configured ────────────────────────
+  // Auto-broadcast if wallet is configured
   if (wallet && txPayload?.to) {
     try {
-      // Pre-flight: check balance
       const { account, walletClient, publicClient } = wallet;
       const balance = await publicClient.getBalance({ address: account.address });
-      const valueWei = txPayload.value && txPayload.value !== "0"
-        ? BigInt(txPayload.value)
-        : BigInt(0);
-      // Conservative gas buffer: 3M gas * 2 gwei (covers most contract deploys)
+      const valueWei = txPayload.value && txPayload.value !== "0" ? BigInt(txPayload.value) : BigInt(0);
       const gasBuffer = BigInt(3_000_000) * BigInt(2_000_000_000);
 
       if (balance < valueWei + gasBuffer) {
@@ -194,24 +405,15 @@ export async function deployContract(params: {
         };
       }
 
-      // Broadcast
       const txHash = await walletClient.sendTransaction({
-        to:   txPayload.to as Address,
-        data: (txPayload.data ?? "0x") as Hex,
+        to:    txPayload.to as Address,
+        data:  (txPayload.data ?? "0x") as Hex,
         value: valueWei,
       });
 
-      // Wait for receipt (up to 60s)
-      const receipt = await publicClient.waitForTransactionReceipt({
-        hash: txHash,
-        timeout: 60_000,
-      });
-
-      // Contract address is in receipt.contractAddress for CREATE txs
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 60_000 });
       const contractAddress = receipt.contractAddress ?? undefined;
-      const gasUsed  = receipt.gasUsed;
-      const gasPrice = receipt.effectiveGasPrice ?? BigInt(0);
-      const gasCost  = formatEther(gasUsed * gasPrice);
+      const gasCost = formatEther(receipt.gasUsed * (receipt.effectiveGasPrice ?? BigInt(0)));
 
       const dashboardUrl = contractAddress
         ? `https://thirdweb.com/${chainId}/${contractAddress}`
@@ -229,7 +431,6 @@ export async function deployContract(params: {
         actions:         nebulaActions,
       };
     } catch (err) {
-      // Broadcast failed — still return Nebula's guide so the user isn't left empty-handed
       return {
         success:  true,
         deployed: false,
@@ -241,26 +442,30 @@ export async function deployContract(params: {
     }
   }
 
-  // ── Step 3b: No wallet — return Nebula's guide only ────────────────────────
-  // Extract any addresses/hashes Nebula already included in actions
-  let contractAddress: string | undefined;
-  let txHash: string | undefined;
-  for (const action of nebulaActions) {
-    const d = action.data ?? {};
-    if (typeof d.contract_address === "string") contractAddress = d.contract_address;
-    if (typeof d.transaction_hash === "string") txHash = d.transaction_hash;
-  }
-
+  // No wallet — return guide only
   return {
-    success:         true,
-    deployed:        false,
-    message:         nebulaMessage,
-    txHash,
-    contractAddress,
-    actions:         nebulaActions,
-    dashboardUrl:    "https://thirdweb.com/dashboard/contracts/deploy",
+    success:      true,
+    deployed:     false,
+    message:      nebulaMessage,
+    actions:      nebulaActions,
+    dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
     error: wallet === null
-      ? "WALLET_PRIVATE_KEY is not configured — add it to .env to enable automated on-chain deployment. Nebula deployment guide is above."
+      ? "WALLET_PRIVATE_KEY is not configured — add it to .env to enable automated on-chain deployment."
       : undefined,
   };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function extractName(description: string): string | null {
+  // "called X" or "named X" pattern
+  const m = description.match(/(?:called|named)\s+"?([A-Za-z0-9 ]+)"?/i);
+  return m ? m[1].trim() : null;
+}
+
+function extractSymbol(description: string): string | null {
+  // "symbol X" or "(X)" or "ticker X"
+  const m = description.match(/(?:symbol|ticker)\s+([A-Z]{2,8})/i)
+    ?? description.match(/\(([A-Z]{2,8})\)/);
+  return m ? m[1].toUpperCase() : null;
 }

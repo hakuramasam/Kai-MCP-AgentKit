@@ -35,7 +35,9 @@ ON-CHAIN (Base Mainnet)
 - base_tx_lookup: full details of any tx by hash — status, value, gas, block, Basescan link
 
 THIRDWEB
-- deploy_contract: deploy ERC-20, ERC-721, ERC-1155, or custom smart contracts on Base (or any EVM chain). Describe the contract in plain English — Nebula AI generates the deployment tx, and the server wallet signs + broadcasts it automatically. Returns tx hash, deployed contract address, gas cost, Basescan link, and Thirdweb dashboard link. If WALLET_PRIVATE_KEY is not set, returns a deployment guide instead. ALWAYS use this when the user asks to create/deploy/launch a contract.
+- deploy_contract: deploy ERC-20, ERC-721, or ERC-1155 contracts on Base using native Thirdweb SDK (no Nebula needed for standard types). Custom contracts use Nebula AI + server wallet auto-sign. Returns tx hash, deployed contract address, gas cost, Basescan link, and Thirdweb dashboard link. ALWAYS use when asked to create/deploy/launch a contract.
+- nft_write: on-chain NFT write operations — mint_erc721 (mint new NFT to address), transfer_erc721, burn_erc721, mint_erc1155, transfer_erc1155, burn_erc1155. Server wallet signs and broadcasts automatically. For minting, upload metadata JSON to IPFS first with the ipfs tool.
+- token_write: on-chain ERC-20 token operations — mint new tokens to an address, transfer tokens from server wallet, burn tokens. Server wallet signs and broadcasts automatically.
 - thirdweb_ai: natural language blockchain questions via Nebula AI (trained on 2500+ EVM chains) — "explain this wallet", "what does this contract do?", "decode this tx", "top NFTs on Base"
 - nft_data: fetch NFT metadata, traits, ownership for any ERC-721/1155 on Base/ETH/Polygon/Arbitrum/Optimism
 - read_contract: call any read-only function on any EVM contract with a human-readable ABI fragment (e.g. balanceOf, name, ownerOf, totalSupply)
@@ -103,6 +105,8 @@ export const ORCHESTRATOR_CONFIG: AgentConfig = {
     "code_review",
     "image_caption",
     "deploy_contract",
+    "nft_write",
+    "token_write",
     "thirdweb_ai",
     "nft_data",
     "read_contract",

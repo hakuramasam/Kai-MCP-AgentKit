@@ -64,7 +64,9 @@ export const TOOL_PRICES: Record<string, string> = {
   thirdweb_ai: "0.0001",       // Nebula AI inference
 
   // Thirdweb on-chain tools
-  deploy_contract: "0.0001",   // Nebula AI + deployment data generation — heavy
+  deploy_contract: "0.0001",   // Native SDK + optional Nebula — heavy
+  nft_write: "0.0001",         // On-chain NFT mint/transfer/burn — heavy (gas + signing)
+  token_write: "0.0001",       // On-chain ERC-20 mint/transfer/burn — heavy (gas + signing)
   read_contract: "0.00001",    // Read-only RPC call — light
   nft_data: "0.00003",         // RPC + IPFS metadata fetch — medium
   ipfs: "0.00003",             // Storage upload/download — medium

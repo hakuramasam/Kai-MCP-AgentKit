@@ -19,6 +19,11 @@ import {
 import { queryNebula, isNebulaConfigured } from "@/features/agent/lib/thirdweb-ai";
 import { deployContract } from "@/features/agent/lib/thirdweb-deploy";
 import { getNFTData, getWalletNFTs } from "@/features/agent/lib/thirdweb-nft";
+import {
+  mintERC721, transferERC721, burnERC721,
+  mintERC1155, transferERC1155, burnERC1155,
+  mintERC20, transferERC20, burnERC20,
+} from "@/features/agent/lib/thirdweb-write";
 import { readContractFunction, resolveChainId } from "@/features/agent/lib/thirdweb-contract";
 import { uploadToIPFS, fetchFromIPFS } from "@/features/agent/lib/thirdweb-ipfs";
 
@@ -292,6 +297,55 @@ export const ipfsSchema = z.object({
     .describe("IPFS URI (ipfs://...), CID (Qm...), or gateway URL to fetch. Required when action='fetch'."),
 });
 
+// ─── Thirdweb: NFT write operations ──────────────────────────────────────────
+
+export const nftWriteSchema = z.object({
+  action: z
+    .enum(["mint_erc721", "transfer_erc721", "burn_erc721", "mint_erc1155", "transfer_erc1155", "burn_erc1155"])
+    .describe(
+      "Operation to perform: mint_erc721 (create new NFT), transfer_erc721 (move NFT to new owner), burn_erc721 (destroy NFT), mint_erc1155 (create multi-token), transfer_erc1155 (move multi-token), burn_erc1155 (destroy multi-token)",
+    ),
+  contractAddress: z.string().describe("NFT contract address (ERC-721 or ERC-1155 on Base)"),
+  to: z.string().optional().describe("Recipient address — required for mint and transfer operations"),
+  from: z.string().optional().describe("Sender address — required for transfer operations"),
+  tokenId: z.number().optional().describe("Token ID — required for transfer, burn, and ERC-1155 mint"),
+  amount: z.number().optional().describe("Token quantity — required for ERC-1155 operations (default: 1)"),
+  metadataUri: z
+    .string()
+    .optional()
+    .describe(
+      "IPFS URI or HTTPS URL for token metadata JSON (name, description, image). Required for mint operations. Use ipfs tool to upload metadata first.",
+    ),
+  chainId: z
+    .number()
+    .default(8453)
+    .describe("Chain ID (8453=Base, 1=Ethereum, 137=Polygon). Defaults to Base."),
+});
+
+// ─── Thirdweb: ERC-20 token write operations ──────────────────────────────────
+
+export const tokenWriteSchema = z.object({
+  action: z
+    .enum(["mint", "transfer", "burn"])
+    .describe(
+      "Operation: mint (create new tokens to an address), transfer (send tokens from server wallet to an address), burn (destroy tokens from server wallet)",
+    ),
+  contractAddress: z.string().describe("ERC-20 token contract address on Base"),
+  to: z
+    .string()
+    .optional()
+    .describe("Recipient address — required for mint and transfer"),
+  amount: z
+    .string()
+    .describe(
+      "Human-readable token amount as a string, e.g. '1000' for 1000 tokens or '0.5' for half a token",
+    ),
+  chainId: z
+    .number()
+    .default(8453)
+    .describe("Chain ID (8453=Base, 1=Ethereum). Defaults to Base."),
+});
+
 // ─── Tool definitions for OpenRouter ─────────────────────────────────────────
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -486,6 +540,24 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       description:
         "Upload content to IPFS or fetch content from IPFS. Upload accepts JSON objects or plain text and returns an IPFS URI + multiple gateway URLs. Fetch retrieves any content by IPFS URI (ipfs://...), CID, or gateway URL.",
       parameters: zodToJsonSchema(ipfsSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "nft_write",
+      description:
+        "Perform on-chain NFT write operations: mint new ERC-721 or ERC-1155 tokens to any address, transfer tokens between addresses, or burn (destroy) tokens. Uses the app's server wallet to sign and broadcast transactions on Base Mainnet. For minting, upload metadata to IPFS first using the ipfs tool.",
+      parameters: zodToJsonSchema(nftWriteSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "token_write",
+      description:
+        "Perform on-chain ERC-20 token operations: mint new tokens to an address, transfer tokens from the server wallet to a recipient, or burn tokens. Uses the app's server wallet to sign and broadcast transactions on Base Mainnet. Requires a deployed ERC-20 contract address.",
+      parameters: zodToJsonSchema(tokenWriteSchema),
     },
   },
 ];
@@ -886,6 +958,76 @@ export async function executeTool(
           const result = await fetchFromIPFS(parsed.uri);
           if (!result.success) return JSON.stringify({ error: result.error });
           return JSON.stringify(result);
+        }
+      }
+
+      case "nft_write": {
+        const parsed = nftWriteSchema.parse(args);
+        const chainId = parsed.chainId ?? 8453;
+
+        switch (parsed.action) {
+          case "mint_erc721": {
+            if (!parsed.to) return JSON.stringify({ error: "to address is required for mint_erc721" });
+            if (!parsed.metadataUri) return JSON.stringify({ error: "metadataUri is required for mint_erc721. Upload metadata to IPFS first." });
+            const result = await mintERC721({ contractAddress: parsed.contractAddress, to: parsed.to, metadataUri: parsed.metadataUri, chainId });
+            return JSON.stringify({ ...result, action: "mint_erc721", powered_by: "Thirdweb SDK v5" });
+          }
+          case "transfer_erc721": {
+            if (!parsed.from) return JSON.stringify({ error: "from address is required for transfer_erc721" });
+            if (!parsed.to) return JSON.stringify({ error: "to address is required for transfer_erc721" });
+            if (parsed.tokenId === undefined) return JSON.stringify({ error: "tokenId is required for transfer_erc721" });
+            const result = await transferERC721({ contractAddress: parsed.contractAddress, from: parsed.from, to: parsed.to, tokenId: parsed.tokenId, chainId });
+            return JSON.stringify({ ...result, action: "transfer_erc721", powered_by: "Thirdweb SDK v5" });
+          }
+          case "burn_erc721": {
+            if (parsed.tokenId === undefined) return JSON.stringify({ error: "tokenId is required for burn_erc721" });
+            const result = await burnERC721({ contractAddress: parsed.contractAddress, tokenId: parsed.tokenId, chainId });
+            return JSON.stringify({ ...result, action: "burn_erc721", powered_by: "Thirdweb SDK v5" });
+          }
+          case "mint_erc1155": {
+            if (!parsed.to) return JSON.stringify({ error: "to address is required for mint_erc1155" });
+            if (parsed.tokenId === undefined) return JSON.stringify({ error: "tokenId is required for mint_erc1155" });
+            const result = await mintERC1155({ contractAddress: parsed.contractAddress, to: parsed.to, tokenId: parsed.tokenId, amount: parsed.amount ?? 1, metadataUri: parsed.metadataUri, chainId });
+            return JSON.stringify({ ...result, action: "mint_erc1155", powered_by: "Thirdweb SDK v5" });
+          }
+          case "transfer_erc1155": {
+            if (!parsed.from) return JSON.stringify({ error: "from address is required for transfer_erc1155" });
+            if (!parsed.to) return JSON.stringify({ error: "to address is required for transfer_erc1155" });
+            if (parsed.tokenId === undefined) return JSON.stringify({ error: "tokenId is required for transfer_erc1155" });
+            const result = await transferERC1155({ contractAddress: parsed.contractAddress, from: parsed.from, to: parsed.to, tokenId: parsed.tokenId, amount: parsed.amount ?? 1, chainId });
+            return JSON.stringify({ ...result, action: "transfer_erc1155", powered_by: "Thirdweb SDK v5" });
+          }
+          case "burn_erc1155": {
+            if (parsed.tokenId === undefined) return JSON.stringify({ error: "tokenId is required for burn_erc1155" });
+            const result = await burnERC1155({ contractAddress: parsed.contractAddress, tokenId: parsed.tokenId, amount: parsed.amount ?? 1, chainId });
+            return JSON.stringify({ ...result, action: "burn_erc1155", powered_by: "Thirdweb SDK v5" });
+          }
+          default:
+            return JSON.stringify({ error: `Unknown nft_write action: ${parsed.action}` });
+        }
+      }
+
+      case "token_write": {
+        const parsed = tokenWriteSchema.parse(args);
+        const chainId = parsed.chainId ?? 8453;
+
+        switch (parsed.action) {
+          case "mint": {
+            if (!parsed.to) return JSON.stringify({ error: "to address is required for token mint" });
+            const result = await mintERC20({ contractAddress: parsed.contractAddress, to: parsed.to, amount: parsed.amount, chainId });
+            return JSON.stringify({ ...result, action: "mint", amount: parsed.amount, powered_by: "Thirdweb SDK v5" });
+          }
+          case "transfer": {
+            if (!parsed.to) return JSON.stringify({ error: "to address is required for token transfer" });
+            const result = await transferERC20({ contractAddress: parsed.contractAddress, to: parsed.to, amount: parsed.amount, chainId });
+            return JSON.stringify({ ...result, action: "transfer", amount: parsed.amount, powered_by: "Thirdweb SDK v5" });
+          }
+          case "burn": {
+            const result = await burnERC20({ contractAddress: parsed.contractAddress, amount: parsed.amount, chainId });
+            return JSON.stringify({ ...result, action: "burn", amount: parsed.amount, powered_by: "Thirdweb SDK v5" });
+          }
+          default:
+            return JSON.stringify({ error: `Unknown token_write action: ${parsed.action}` });
         }
       }
 
