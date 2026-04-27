@@ -199,8 +199,9 @@ export const imageCaptionSchema = z.object({
 export const deployContractSchema = z.object({
   description: z
     .string()
+    .optional()
     .describe(
-      "Plain English description of the contract to deploy, e.g. 'an ERC-721 NFT collection called CoolCats with a max supply of 10,000' or 'an ERC-20 token called MyToken with symbol MTK and 1 million supply'",
+      "Plain English description of the contract to deploy, e.g. 'an ERC-721 NFT collection called CoolCats with max supply 10,000'. Optional — defaults to name + contractType if omitted.",
     ),
   contractType: z
     .enum(["ERC-20", "ERC-721", "ERC-1155", "custom"])
@@ -848,8 +849,14 @@ export async function executeTool(
 
       case "deploy_contract": {
         const parsed = deployContractSchema.parse(args);
+        const autoDesc = [
+          parsed.contractType ?? "smart contract",
+          parsed.name   ? `called ${parsed.name}`   : null,
+          parsed.symbol ? `(${parsed.symbol})`      : null,
+          `on chain ${parsed.chainId ?? 8453}`,
+        ].filter(Boolean).join(" ");
         const result = await deployContract({
-          description:   parsed.description,
+          description:   parsed.description ?? autoDesc,
           contractType:  parsed.contractType,
           name:          parsed.name,
           symbol:        parsed.symbol,

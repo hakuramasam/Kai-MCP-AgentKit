@@ -361,9 +361,14 @@ async function deployWithNebula(params: {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function noWalletError(type: string): DeployResult {
+  const missing: string[] = [];
+  if (!process.env.THIRDWEB_CLIENT_ID)             missing.push("THIRDWEB_CLIENT_ID");
+  if (!process.env.WALLET_PRIVATE_KEY)             missing.push("WALLET_PRIVATE_KEY");
+  if (!process.env.THIRDWEB_VAULT_ACCESS_TOKEN)    missing.push("THIRDWEB_VAULT_ACCESS_TOKEN");
+  if (!process.env.THIRDWEB_VAULT_ACCOUNT_ADDRESS) missing.push("THIRDWEB_VAULT_ACCOUNT_ADDRESS");
   return {
     success: false, deployed: false,
-    error: `Cannot deploy ${type}: neither WALLET_PRIVATE_KEY nor Thirdweb Vault credentials are configured.`,
+    error: `Cannot deploy ${type}: missing env vars: ${missing.join(", ")}. Add them to the environment variables panel and restart the server.`,
     dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
   };
 }
