@@ -12,9 +12,10 @@
  * Falls back to WALLET_PRIVATE_KEY + native SDK if Vault is not configured.
  */
 
-import { createThirdwebClient, getContract, sendAndConfirmTransaction } from "thirdweb";
+import { createThirdwebClient, getContract } from "thirdweb";
 import { base, mainnet, polygon, arbitrum, optimism } from "thirdweb/chains";
 import { privateKeyToAccount } from "thirdweb/wallets";
+import { getGaslessAccount, isGaslessConfigured, sendAndConfirmTransaction } from "@/features/agent/lib/gasless";
 import {
   mintTo    as erc721MintTo,
   transferFrom as erc721TransferFrom,
@@ -81,9 +82,22 @@ export async function mintERC721(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
 
-  // Vault path
+  // ── Tier 1: Gasless smart account ────────────────────────────────────────
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc721MintTo({ contract, to: params.to, nft: params.metadataUri });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) {
+      console.error("[nft_write] gasless mintERC721 failed:", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // ── Tier 2: Vault / Engine Cloud ─────────────────────────────────────────
+  const vault = getVaultConfig();
   if (vault) {
     return toWriteResult(await vaultWriteContract({
       contractAddress: params.contractAddress,
@@ -93,10 +107,9 @@ export async function mintERC721(params: {
     }));
   }
 
-  // SDK fallback
+  // ── Tier 3: SDK with WALLET_PRIVATE_KEY ──────────────────────────────────
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc721MintTo({ contract, to: params.to, nft: params.metadataUri });
@@ -115,31 +128,28 @@ export async function transferERC721(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
 
-  if (vault) {
-    return toWriteResult(
-      await vaultWriteContract({
-        contractAddress: params.contractAddress,
-        method: "function transferFrom(address from, address to, uint256 tokenId)",
-        args:   [params.from, params.to, String(params.tokenId)],
-        chainId,
-      }),
-      String(params.tokenId),
-    );
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc721TransferFrom({ contract, from: params.from, to: params.to, tokenId: BigInt(params.tokenId) });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) { console.error("[nft_write] gasless transferERC721 failed:", err instanceof Error ? err.message : String(err)); }
   }
+
+  const vault = getVaultConfig();
+  if (vault) return toWriteResult(await vaultWriteContract({ contractAddress: params.contractAddress, method: "function transferFrom(address from, address to, uint256 tokenId)", args: [params.from, params.to, String(params.tokenId)], chainId }), String(params.tokenId));
 
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc721TransferFrom({ contract, from: params.from, to: params.to, tokenId: BigInt(params.tokenId) });
     const receipt = await sendAndConfirmTransaction({ transaction: tx, account: sdk.account });
     return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
-  } catch (err) {
-    return { success: false, error: `ERC-721 transfer failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  } catch (err) { return { success: false, error: `ERC-721 transfer failed: ${err instanceof Error ? err.message : String(err)}` }; }
 }
 
 export async function burnERC721(params: {
@@ -148,31 +158,28 @@ export async function burnERC721(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
 
-  if (vault) {
-    return toWriteResult(
-      await vaultWriteContract({
-        contractAddress: params.contractAddress,
-        method: "function burn(uint256 tokenId)",
-        args:   [String(params.tokenId)],
-        chainId,
-      }),
-      String(params.tokenId),
-    );
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc721Burn({ contract, tokenId: BigInt(params.tokenId) });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) { console.error("[nft_write] gasless burnERC721 failed:", err instanceof Error ? err.message : String(err)); }
   }
+
+  const vault = getVaultConfig();
+  if (vault) return toWriteResult(await vaultWriteContract({ contractAddress: params.contractAddress, method: "function burn(uint256 tokenId)", args: [String(params.tokenId)], chainId }), String(params.tokenId));
 
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc721Burn({ contract, tokenId: BigInt(params.tokenId) });
     const receipt = await sendAndConfirmTransaction({ transaction: tx, account: sdk.account });
     return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
-  } catch (err) {
-    return { success: false, error: `ERC-721 burn failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  } catch (err) { return { success: false, error: `ERC-721 burn failed: ${err instanceof Error ? err.message : String(err)}` }; }
 }
 
 // ─── ERC-1155 write operations ────────────────────────────────────────────────
@@ -186,31 +193,28 @@ export async function mintERC1155(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
 
-  if (vault) {
-    return toWriteResult(
-      await vaultWriteContract({
-        contractAddress: params.contractAddress,
-        method: "function mintTo(address to, uint256 tokenId, string memory uri, uint256 amount)",
-        args:   [params.to, String(params.tokenId), params.metadataUri ?? "", String(params.amount)],
-        chainId,
-      }),
-      String(params.tokenId),
-    );
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc1155MintTo({ contract, to: params.to, tokenId: BigInt(params.tokenId), supply: BigInt(params.amount), nft: params.metadataUri ?? "" });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) { console.error("[nft_write] gasless mintERC1155 failed:", err instanceof Error ? err.message : String(err)); }
   }
+
+  const vault = getVaultConfig();
+  if (vault) return toWriteResult(await vaultWriteContract({ contractAddress: params.contractAddress, method: "function mintTo(address to, uint256 tokenId, string memory uri, uint256 amount)", args: [params.to, String(params.tokenId), params.metadataUri ?? "", String(params.amount)], chainId }), String(params.tokenId));
 
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc1155MintTo({ contract, to: params.to, tokenId: BigInt(params.tokenId), supply: BigInt(params.amount), nft: params.metadataUri ?? "" });
     const receipt = await sendAndConfirmTransaction({ transaction: tx, account: sdk.account });
     return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
-  } catch (err) {
-    return { success: false, error: `ERC-1155 mint failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  } catch (err) { return { success: false, error: `ERC-1155 mint failed: ${err instanceof Error ? err.message : String(err)}` }; }
 }
 
 export async function transferERC1155(params: {
@@ -222,31 +226,28 @@ export async function transferERC1155(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
 
-  if (vault) {
-    return toWriteResult(
-      await vaultWriteContract({
-        contractAddress: params.contractAddress,
-        method: "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)",
-        args:   [params.from, params.to, String(params.tokenId), String(params.amount), "0x"],
-        chainId,
-      }),
-      String(params.tokenId),
-    );
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc1155TransferFrom({ contract, from: params.from, to: params.to, tokenId: BigInt(params.tokenId), value: BigInt(params.amount), data: "0x" });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) { console.error("[nft_write] gasless transferERC1155 failed:", err instanceof Error ? err.message : String(err)); }
   }
+
+  const vault = getVaultConfig();
+  if (vault) return toWriteResult(await vaultWriteContract({ contractAddress: params.contractAddress, method: "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)", args: [params.from, params.to, String(params.tokenId), String(params.amount), "0x"], chainId }), String(params.tokenId));
 
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc1155TransferFrom({ contract, from: params.from, to: params.to, tokenId: BigInt(params.tokenId), value: BigInt(params.amount), data: "0x" });
     const receipt = await sendAndConfirmTransaction({ transaction: tx, account: sdk.account });
     return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
-  } catch (err) {
-    return { success: false, error: `ERC-1155 transfer failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  } catch (err) { return { success: false, error: `ERC-1155 transfer failed: ${err instanceof Error ? err.message : String(err)}` }; }
 }
 
 export async function burnERC1155(params: {
@@ -256,32 +257,28 @@ export async function burnERC1155(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
-  const owner   = vault?.accountAddress ?? process.env.WALLET_PRIVATE_KEY;
 
-  if (vault) {
-    return toWriteResult(
-      await vaultWriteContract({
-        contractAddress: params.contractAddress,
-        method: "function burn(address account, uint256 id, uint256 value)",
-        args:   [vault.accountAddress, String(params.tokenId), String(params.amount)],
-        chainId,
-      }),
-      String(params.tokenId),
-    );
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc1155Burn({ contract, owner: (smartAccount as { address: string }).address, tokenId: BigInt(params.tokenId), value: BigInt(params.amount) });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) { console.error("[nft_write] gasless burnERC1155 failed:", err instanceof Error ? err.message : String(err)); }
   }
+
+  const vault = getVaultConfig();
+  if (vault) return toWriteResult(await vaultWriteContract({ contractAddress: params.contractAddress, method: "function burn(address account, uint256 id, uint256 value)", args: [vault.accountAddress, String(params.tokenId), String(params.amount)], chainId }), String(params.tokenId));
 
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc1155Burn({ contract, owner: (sdk.account as { address: string }).address, tokenId: BigInt(params.tokenId), value: BigInt(params.amount) });
     const receipt = await sendAndConfirmTransaction({ transaction: tx, account: sdk.account });
     return { success: true, txHash: receipt.transactionHash, tokenId: String(params.tokenId), explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
-  } catch (err) {
-    return { success: false, error: `ERC-1155 burn failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  } catch (err) { return { success: false, error: `ERC-1155 burn failed: ${err instanceof Error ? err.message : String(err)}` }; }
 }
 
 // ─── ERC-20 write operations ──────────────────────────────────────────────────
@@ -293,28 +290,28 @@ export async function mintERC20(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
 
-  if (vault) {
-    return toWriteResult(await vaultWriteContract({
-      contractAddress: params.contractAddress,
-      method: "function mintTo(address to, uint256 amount)",
-      args:   [params.to, params.amount],
-      chainId,
-    }));
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc20MintTo({ contract, to: params.to, amount: params.amount });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) { console.error("[token_write] gasless mintERC20 failed:", err instanceof Error ? err.message : String(err)); }
   }
+
+  const vault = getVaultConfig();
+  if (vault) return toWriteResult(await vaultWriteContract({ contractAddress: params.contractAddress, method: "function mintTo(address to, uint256 amount)", args: [params.to, params.amount], chainId }));
 
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc20MintTo({ contract, to: params.to, amount: params.amount });
     const receipt = await sendAndConfirmTransaction({ transaction: tx, account: sdk.account });
     return { success: true, txHash: receipt.transactionHash, explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
-  } catch (err) {
-    return { success: false, error: `ERC-20 mint failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  } catch (err) { return { success: false, error: `ERC-20 mint failed: ${err instanceof Error ? err.message : String(err)}` }; }
 }
 
 export async function transferERC20(params: {
@@ -324,28 +321,28 @@ export async function transferERC20(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
 
-  if (vault) {
-    return toWriteResult(await vaultWriteContract({
-      contractAddress: params.contractAddress,
-      method: "function transfer(address to, uint256 amount)",
-      args:   [params.to, params.amount],
-      chainId,
-    }));
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc20Transfer({ contract, to: params.to, amount: params.amount });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) { console.error("[token_write] gasless transferERC20 failed:", err instanceof Error ? err.message : String(err)); }
   }
+
+  const vault = getVaultConfig();
+  if (vault) return toWriteResult(await vaultWriteContract({ contractAddress: params.contractAddress, method: "function transfer(address to, uint256 amount)", args: [params.to, params.amount], chainId }));
 
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc20Transfer({ contract, to: params.to, amount: params.amount });
     const receipt = await sendAndConfirmTransaction({ transaction: tx, account: sdk.account });
     return { success: true, txHash: receipt.transactionHash, explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
-  } catch (err) {
-    return { success: false, error: `ERC-20 transfer failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  } catch (err) { return { success: false, error: `ERC-20 transfer failed: ${err instanceof Error ? err.message : String(err)}` }; }
 }
 
 export async function burnERC20(params: {
@@ -354,28 +351,28 @@ export async function burnERC20(params: {
   chainId?: number;
 }): Promise<WriteResult> {
   const chainId = params.chainId ?? 8453;
-  const vault   = getVaultConfig();
 
-  if (vault) {
-    return toWriteResult(await vaultWriteContract({
-      contractAddress: params.contractAddress,
-      method: "function burn(uint256 amount)",
-      args:   [params.amount],
-      chainId,
-    }));
+  if (isGaslessConfigured()) {
+    try {
+      const { smartAccount, client } = await getGaslessAccount(chainId);
+      const contract = getContract({ client, chain: resolveChain(chainId), address: params.contractAddress });
+      const tx = erc20Burn({ contract, amount: params.amount });
+      const receipt = await sendAndConfirmTransaction({ transaction: tx, account: smartAccount });
+      return { success: true, txHash: receipt.transactionHash, explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
+    } catch (err) { console.error("[token_write] gasless burnERC20 failed:", err instanceof Error ? err.message : String(err)); }
   }
+
+  const vault = getVaultConfig();
+  if (vault) return toWriteResult(await vaultWriteContract({ contractAddress: params.contractAddress, method: "function burn(uint256 amount)", args: [params.amount], chainId }));
 
   const sdk = getSdkAccount();
   if (!sdk) return noWalletError();
-
   try {
     const contract = getContract({ client: sdk.client, chain: resolveChain(chainId), address: params.contractAddress });
     const tx = erc20Burn({ contract, amount: params.amount });
     const receipt = await sendAndConfirmTransaction({ transaction: tx, account: sdk.account });
     return { success: true, txHash: receipt.transactionHash, explorerUrl: `https://basescan.org/tx/${receipt.transactionHash}` };
-  } catch (err) {
-    return { success: false, error: `ERC-20 burn failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  } catch (err) { return { success: false, error: `ERC-20 burn failed: ${err instanceof Error ? err.message : String(err)}` }; }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
