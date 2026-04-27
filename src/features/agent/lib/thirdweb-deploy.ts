@@ -21,6 +21,7 @@ import {
   deployERC1155Contract,
 } from "thirdweb/deploys";
 import { getVaultConfig, vaultSendTransaction } from "@/features/agent/lib/vault";
+import { viemDeployERC20, viemDeployERC721, viemDeployERC1155 } from "@/features/agent/lib/viem-deploy";
 
 const NEBULA_BASE = "https://nebula-api.thirdweb.com";
 
@@ -104,135 +105,91 @@ function inferContractType(description: string): string {
   return "custom";
 }
 
-// ─── ERC-20 native deploy ──────────────────────────────────────────────────────
+// ─── ERC-20 deploy ─────────────────────────────────────────────────────────────
 
 async function deployNativeERC20(params: {
   name?: string; symbol?: string; description: string; extraParams?: string;
 }, chainId: number): Promise<DeployResult> {
+  const name   = params.name   ?? extractName(params.description)   ?? "MyToken";
+  const symbol = params.symbol ?? extractSymbol(params.description) ?? "MTK";
+
+  // Try Thirdweb SDK first (if client credentials available)
   const account = getDeployAccount();
-  const vault   = getVaultConfig();
-
-  if (!account && !vault) {
-    return noWalletError("ERC-20");
+  if (account) {
+    try {
+      const client = getThirdwebClient();
+      const chain  = CHAIN_MAP[chainId] ?? base;
+      const vault  = getVaultConfig();
+      const saleRecipient = vault?.accountAddress ?? (account as { address: string }).address;
+      const contractAddress = await deployERC20Contract({
+        chain, client, account, type: "TokenERC20",
+        params: { name, symbol, description: params.description, primarySaleRecipient: saleRecipient },
+      });
+      return { success: true, deployed: true, message: `ERC-20 token "${name}" (${symbol}) deployed on Base Mainnet.`, contractAddress, dashboardUrl: `https://thirdweb.com/${chainId}/${contractAddress}`, explorerUrl: `https://basescan.org/address/${contractAddress}` };
+    } catch { /* fall through to viem path */ }
   }
 
-  if (!account) {
-    return {
-      success: false, deployed: false,
-      error:        "WALLET_PRIVATE_KEY is required for native ERC-20 deployment. Alternatively, go to the Thirdweb dashboard to deploy manually.",
-      dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
-    };
-  }
-
-  try {
-    const client  = getThirdwebClient();
-    const chain   = CHAIN_MAP[chainId] ?? base;
-    const name    = params.name   ?? extractName(params.description)   ?? "MyToken";
-    const symbol  = params.symbol ?? extractSymbol(params.description) ?? "MTK";
-    const saleRecipient = vault?.accountAddress ?? (account as { address: string }).address;
-
-    const contractAddress = await deployERC20Contract({
-      chain, client, account,
-      type: "TokenERC20",
-      params: { name, symbol, description: params.description, primarySaleRecipient: saleRecipient },
-    });
-
-    return {
-      success: true, deployed: true,
-      message:         `ERC-20 token "${name}" (${symbol}) deployed on Base Mainnet.`,
-      contractAddress,
-      dashboardUrl:    `https://thirdweb.com/${chainId}/${contractAddress}`,
-      explorerUrl:     `https://basescan.org/address/${contractAddress}`,
-    };
-  } catch (err) {
-    return { success: false, deployed: false, error: `ERC-20 deploy failed: ${err instanceof Error ? err.message : String(err)}`, dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy" };
-  }
+  // Viem direct deploy (needs only WALLET_PRIVATE_KEY + BASE_RPC_URL)
+  const result = await viemDeployERC20({ name, symbol, chainId });
+  return { ...result, message: result.message ?? `ERC-20 token "${name}" (${symbol}) deployed.` };
 }
 
-// ─── ERC-721 native deploy ────────────────────────────────────────────────────
+// ─── ERC-721 deploy ───────────────────────────────────────────────────────────
 
 async function deployNativeERC721(params: {
   name?: string; symbol?: string; description: string; extraParams?: string;
 }, chainId: number): Promise<DeployResult> {
+  const name   = params.name   ?? extractName(params.description)   ?? "MyNFT";
+  const symbol = params.symbol ?? extractSymbol(params.description) ?? "NFT";
+
+  // Try Thirdweb SDK first
   const account = getDeployAccount();
-  const vault   = getVaultConfig();
-
-  if (!account && !vault) return noWalletError("ERC-721");
-
-  if (!account) {
-    return {
-      success: false, deployed: false,
-      error:        "WALLET_PRIVATE_KEY is required for native ERC-721 deployment.",
-      dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
-    };
+  if (account) {
+    try {
+      const client = getThirdwebClient();
+      const chain  = CHAIN_MAP[chainId] ?? base;
+      const vault  = getVaultConfig();
+      const saleRecipient = vault?.accountAddress ?? (account as { address: string }).address;
+      const contractAddress = await deployERC721Contract({
+        chain, client, account, type: "TokenERC721",
+        params: { name, symbol, description: params.description, primarySaleRecipient: saleRecipient },
+      });
+      return { success: true, deployed: true, message: `ERC-721 collection "${name}" (${symbol}) deployed on Base Mainnet.`, contractAddress, dashboardUrl: `https://thirdweb.com/${chainId}/${contractAddress}`, explorerUrl: `https://basescan.org/address/${contractAddress}` };
+    } catch { /* fall through to viem path */ }
   }
 
-  try {
-    const client  = getThirdwebClient();
-    const chain   = CHAIN_MAP[chainId] ?? base;
-    const name    = params.name   ?? extractName(params.description)   ?? "MyNFT";
-    const symbol  = params.symbol ?? extractSymbol(params.description) ?? "NFT";
-    const saleRecipient = vault?.accountAddress ?? (account as { address: string }).address;
-
-    const contractAddress = await deployERC721Contract({
-      chain, client, account,
-      type: "TokenERC721",
-      params: { name, symbol, description: params.description, primarySaleRecipient: saleRecipient },
-    });
-
-    return {
-      success: true, deployed: true,
-      message:         `ERC-721 collection "${name}" (${symbol}) deployed on Base Mainnet.`,
-      contractAddress,
-      dashboardUrl:    `https://thirdweb.com/${chainId}/${contractAddress}`,
-      explorerUrl:     `https://basescan.org/address/${contractAddress}`,
-    };
-  } catch (err) {
-    return { success: false, deployed: false, error: `ERC-721 deploy failed: ${err instanceof Error ? err.message : String(err)}`, dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy" };
-  }
+  // Viem direct deploy
+  const result = await viemDeployERC721({ name, symbol, chainId });
+  return { ...result, message: result.message ?? `ERC-721 collection "${name}" (${symbol}) deployed.` };
 }
 
-// ─── ERC-1155 native deploy ───────────────────────────────────────────────────
+// ─── ERC-1155 deploy ──────────────────────────────────────────────────────────
 
 async function deployNativeERC1155(params: {
   name?: string; symbol?: string; description: string; extraParams?: string;
 }, chainId: number): Promise<DeployResult> {
+  const name   = params.name   ?? extractName(params.description)   ?? "MyMultiToken";
+  const symbol = params.symbol ?? extractSymbol(params.description) ?? "MTT";
+
+  // Try Thirdweb SDK first
   const account = getDeployAccount();
-  const vault   = getVaultConfig();
-
-  if (!account && !vault) return noWalletError("ERC-1155");
-
-  if (!account) {
-    return {
-      success: false, deployed: false,
-      error:        "WALLET_PRIVATE_KEY is required for native ERC-1155 deployment.",
-      dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy",
-    };
+  if (account) {
+    try {
+      const client = getThirdwebClient();
+      const chain  = CHAIN_MAP[chainId] ?? base;
+      const vault  = getVaultConfig();
+      const saleRecipient = vault?.accountAddress ?? (account as { address: string }).address;
+      const contractAddress = await deployERC1155Contract({
+        chain, client, account, type: "TokenERC1155",
+        params: { name, symbol, description: params.description, primarySaleRecipient: saleRecipient },
+      });
+      return { success: true, deployed: true, message: `ERC-1155 multi-token "${name}" deployed on Base Mainnet.`, contractAddress, dashboardUrl: `https://thirdweb.com/${chainId}/${contractAddress}`, explorerUrl: `https://basescan.org/address/${contractAddress}` };
+    } catch { /* fall through to viem path */ }
   }
 
-  try {
-    const client  = getThirdwebClient();
-    const chain   = CHAIN_MAP[chainId] ?? base;
-    const name    = params.name   ?? extractName(params.description)   ?? "MyMultiToken";
-    const symbol  = params.symbol ?? extractSymbol(params.description) ?? "MTT";
-    const saleRecipient = vault?.accountAddress ?? (account as { address: string }).address;
-
-    const contractAddress = await deployERC1155Contract({
-      chain, client, account,
-      type: "TokenERC1155",
-      params: { name, symbol, description: params.description, primarySaleRecipient: saleRecipient },
-    });
-
-    return {
-      success: true, deployed: true,
-      message:         `ERC-1155 multi-token contract "${name}" (${symbol}) deployed on Base Mainnet.`,
-      contractAddress,
-      dashboardUrl:    `https://thirdweb.com/${chainId}/${contractAddress}`,
-      explorerUrl:     `https://basescan.org/address/${contractAddress}`,
-    };
-  } catch (err) {
-    return { success: false, deployed: false, error: `ERC-1155 deploy failed: ${err instanceof Error ? err.message : String(err)}`, dashboardUrl: "https://thirdweb.com/dashboard/contracts/deploy" };
-  }
+  // Viem direct deploy
+  const result = await viemDeployERC1155({ name, symbol, chainId });
+  return { ...result, message: result.message ?? `ERC-1155 multi-token "${name}" deployed.` };
 }
 
 // ─── Custom contract via Nebula + Engine Cloud Vault ──────────────────────────
