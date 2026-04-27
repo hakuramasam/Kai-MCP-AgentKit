@@ -57,11 +57,14 @@ export interface WriteResult {
 // ─── SDK fallback (WALLET_PRIVATE_KEY path) ───────────────────────────────────
 
 function getSdkAccount() {
-  const rawKey = process.env.WALLET_PRIVATE_KEY;
+  const rawKey    = process.env.WALLET_PRIVATE_KEY;
   if (!rawKey?.startsWith("0x") || rawKey.length !== 66) return null;
-  const clientId = process.env.THIRDWEB_CLIENT_ID;
-  if (!clientId) return null;
-  const client = createThirdwebClient({ clientId });
+  const secretKey = process.env.THIRDWEB_SECRET_KEY;
+  const clientId  = process.env.THIRDWEB_CLIENT_ID;
+  if (!secretKey && !clientId) return null;
+  const client = secretKey
+    ? createThirdwebClient({ secretKey })
+    : createThirdwebClient({ clientId: clientId! });
   return { account: privateKeyToAccount({ privateKey: rawKey as `0x${string}`, client }), client };
 }
 

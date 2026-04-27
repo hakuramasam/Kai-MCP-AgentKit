@@ -46,9 +46,11 @@ export interface DeployResult {
 // ─── Thirdweb client + account ────────────────────────────────────────────────
 
 function getThirdwebClient() {
-  const clientId = process.env.THIRDWEB_CLIENT_ID;
-  if (!clientId) throw new Error("THIRDWEB_CLIENT_ID is not configured. Get a free key at thirdweb.com/dashboard.");
-  return createThirdwebClient({ clientId });
+  const clientId  = process.env.THIRDWEB_CLIENT_ID;
+  const secretKey = process.env.THIRDWEB_SECRET_KEY;
+  if (secretKey) return createThirdwebClient({ secretKey });
+  if (clientId)  return createThirdwebClient({ clientId });
+  throw new Error("No Thirdweb credentials found. Add THIRDWEB_CLIENT_ID or THIRDWEB_SECRET_KEY to your environment variables.");
 }
 
 /**
@@ -62,22 +64,14 @@ function getThirdwebClient() {
  * For raw tx broadcasts we use the Engine Cloud Vault API directly.
  */
 function getDeployAccount() {
-  const vault = getVaultConfig();
-  if (!vault) return null;
-
-  // We create a minimal account object that the thirdweb SDK deploy functions
-  // accept. The SDK uses the client + secret key to sign; we provide the
-  // Vault wallet address as the identity.
-  const client = getThirdwebClient();
-
-  // Try WALLET_PRIVATE_KEY first (legacy fallback for SDK deploy functions).
-  // If not present, we can still use Engine Cloud for custom deploys.
   const rawKey = process.env.WALLET_PRIVATE_KEY;
-  if (rawKey?.startsWith("0x") && rawKey.length === 66) {
+  if (!rawKey?.startsWith("0x") || rawKey.length !== 66) return null;
+  try {
+    const client = getThirdwebClient();
     return privateKeyToAccount({ privateKey: rawKey as `0x${string}`, client });
+  } catch {
+    return null;
   }
-
-  return null;
 }
 
 // ─── Main entry point ──────────────────────────────────────────────────────────
