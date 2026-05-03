@@ -119,7 +119,7 @@ export async function GET() {
 
       // ── Meta ────────────────────────────────────────────────────────────────
       contact: {
-        farcaster: `https://warpcast.com/~/mini-apps`,
+        farcaster: `https://warpcast.com/haku85`,
         homepage:  `https://${publicConfig.canonicalDomain}`,
         catalog:   `https://${publicConfig.canonicalDomain}/api/tools`,
         discovery: `https://${publicConfig.canonicalDomain}/.well-known/agent.json`,
