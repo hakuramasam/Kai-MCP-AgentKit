@@ -56,6 +56,10 @@ export async function GET() {
         "streaming",
         "semantic-memory",
         "blockchain-reads",
+        "contract-deployment",
+        "nft-operations",
+        "token-operations",
+        "gasless-transactions",
         "ai-inference",
         "ipfs-storage",
       ],
@@ -115,7 +119,10 @@ export async function GET() {
 
       // ── Meta ────────────────────────────────────────────────────────────────
       contact: {
-        farcaster: `https://warpcast.com/`,
+        farcaster: `https://warpcast.com/~/mini-apps`,
+        homepage:  `https://${publicConfig.canonicalDomain}`,
+        catalog:   `https://${publicConfig.canonicalDomain}/api/tools`,
+        discovery: `https://${publicConfig.canonicalDomain}/.well-known/agent.json`,
       },
       generatedAt: new Date().toISOString(),
     },
