@@ -26,6 +26,8 @@ import {
 } from "@/features/agent/lib/thirdweb-write";
 import { readContractFunction, resolveChainId } from "@/features/agent/lib/thirdweb-contract";
 import { uploadToIPFS, fetchFromIPFS } from "@/features/agent/lib/thirdweb-ipfs";
+import { checkTokenGate } from "@/features/agent/lib/token-gate";
+import type { TokenType } from "@/features/agent/lib/token-gate";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -298,6 +300,30 @@ export const ipfsSchema = z.object({
     .describe("IPFS URI (ipfs://...), CID (Qm...), or gateway URL to fetch. Required when action='fetch'."),
 });
 
+// ─── Token gate check ─────────────────────────────────────────────────────────
+
+export const tokenGateSchema = z.object({
+  walletAddress: z.string().describe("Ethereum wallet address to check (0x...)"),
+  contractAddress: z.string().describe("Token or NFT contract address to check against"),
+  tokenType: z
+    .enum(["ERC-20", "ERC-721", "ERC-1155"])
+    .describe("Token standard: ERC-20 (fungible), ERC-721 (NFT), ERC-1155 (multi-token)"),
+  minBalance: z
+    .string()
+    .default("1")
+    .describe(
+      "Minimum balance required to pass the gate. For ERC-20, this is in human-readable units (e.g. '10' for 10 tokens). For ERC-721/1155, use '1' to require at least one.",
+    ),
+  tokenId: z
+    .number()
+    .optional()
+    .describe("ERC-1155 only: which token ID to check the balance of"),
+  chainId: z
+    .number()
+    .default(8453)
+    .describe("Chain ID (8453=Base, 1=Ethereum, 137=Polygon, 42161=Arbitrum, 10=Optimism). Defaults to Base."),
+});
+
 // ─── Thirdweb: NFT write operations ──────────────────────────────────────────
 
 export const nftWriteSchema = z.object({
@@ -541,6 +567,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       description:
         "Upload content to IPFS or fetch content from IPFS. Upload accepts JSON objects or plain text and returns an IPFS URI + multiple gateway URLs. Fetch retrieves any content by IPFS URI (ipfs://...), CID, or gateway URL.",
       parameters: zodToJsonSchema(ipfsSchema),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "check_token_gate",
+      description:
+        "Check if a wallet address holds a required amount of a specific token or NFT on any EVM chain. Supports ERC-20 tokens, ERC-721 NFTs, and ERC-1155 multi-tokens. Returns allowed: true/false, current balance, token name/symbol, and the contract address. Use to verify token ownership before granting access, awarding rewards, or gating content.",
+      parameters: zodToJsonSchema(tokenGateSchema),
     },
   },
   {
@@ -1036,6 +1071,23 @@ export async function executeTool(
           default:
             return JSON.stringify({ error: `Unknown token_write action: ${parsed.action}` });
         }
+      }
+
+      case "check_token_gate": {
+        const parsed = tokenGateSchema.parse(args);
+        const result = await checkTokenGate(parsed.walletAddress, {
+          contractAddress: parsed.contractAddress,
+          tokenType: parsed.tokenType as TokenType,
+          minBalance: parsed.minBalance,
+          tokenId: parsed.tokenId,
+          chainId: parsed.chainId,
+        });
+        return JSON.stringify({
+          ...result,
+          summary: result.allowed
+            ? `✅ Gate passed — wallet holds ${result.balanceFormatted}${result.tokenSymbol ? " " + result.tokenSymbol : ""} (required: ${result.minRequired})`
+            : `🚫 Gate denied — wallet holds ${result.balanceFormatted}${result.tokenSymbol ? " " + result.tokenSymbol : ""} (required: ${result.minRequired})`,
+        });
       }
 
       default:

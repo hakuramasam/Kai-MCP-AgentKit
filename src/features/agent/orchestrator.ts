@@ -38,6 +38,7 @@ THIRDWEB
 - deploy_contract: deploy ERC-20, ERC-721, or ERC-1155 contracts on Base using native Thirdweb SDK (no Nebula needed for standard types). Custom contracts use Nebula AI + server wallet auto-sign. Returns tx hash, deployed contract address, gas cost, Basescan link, and Thirdweb dashboard link. ALWAYS use when asked to create/deploy/launch a contract.
 - nft_write: on-chain NFT write operations — mint_erc721 (mint new NFT to address), transfer_erc721, burn_erc721, mint_erc1155, transfer_erc1155, burn_erc1155. Server wallet signs and broadcasts automatically. For minting, upload metadata JSON to IPFS first with the ipfs tool.
 - token_write: on-chain ERC-20 token operations — mint new tokens to an address, transfer tokens from server wallet, burn tokens. Server wallet signs and broadcasts automatically.
+- check_token_gate: verify if a wallet holds a required ERC-20, ERC-721, or ERC-1155 token. Returns allowed true/false, current balance, and token name/symbol. Use for eligibility checks, gating access, or verifying NFT ownership before rewarding users.
 - thirdweb_ai: natural language blockchain questions via Nebula AI (trained on 2500+ EVM chains) — "explain this wallet", "what does this contract do?", "decode this tx", "top NFTs on Base"
 - nft_data: fetch NFT metadata, traits, ownership for any ERC-721/1155 on Base/ETH/Polygon/Arbitrum/Optimism
 - read_contract: call any read-only function on any EVM contract with a human-readable ABI fragment (e.g. balanceOf, name, ownerOf, totalSupply)
@@ -107,6 +108,7 @@ export const ORCHESTRATOR_CONFIG: AgentConfig = {
     "deploy_contract",
     "nft_write",
     "token_write",
+    "check_token_gate",
     "thirdweb_ai",
     "nft_data",
     "read_contract",

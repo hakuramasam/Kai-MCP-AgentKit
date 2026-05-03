@@ -68,6 +68,7 @@ export const TOOL_PRICES: Record<string, string> = {
   nft_write: "0.0001",         // On-chain NFT mint/transfer/burn — heavy (gas + signing)
   token_write: "0.0001",       // On-chain ERC-20 mint/transfer/burn — heavy (gas + signing)
   read_contract: "0.00001",    // Read-only RPC call — light
+  check_token_gate: "0.00001", // Read-only balanceOf — very light
   nft_data: "0.00003",         // RPC + IPFS metadata fetch — medium
   ipfs: "0.00003",             // Storage upload/download — medium
 
