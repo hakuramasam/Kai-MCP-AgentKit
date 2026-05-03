@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    turbopackFileSystemCacheForDev: false,
+  },
   typescript: {
     // Type-checking runs out of memory in the build environment.
     // Types are still checked via `tsc --noEmit` in the validate script.
